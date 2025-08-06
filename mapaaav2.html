@@ -17,6 +17,18 @@
       height: 100%;
       filter: grayscale(100%) brightness(60%) contrast(140%) hue-rotate(30deg) sepia(40%) saturate(130%) blur(0.3px);
     }
+    #filter-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 500;
+  background-color: rgba(0, 0, 0, 0);
+  filter: grayscale(100%) brightness(60%) contrast(140%) hue-rotate(30deg) sepia(40%) saturate(130%) blur(0.3px);
+}
+
     #panel {
       position: absolute;
       bottom: 0;
@@ -74,6 +86,8 @@
     </div>
     <div id="character-list"></div>
   </div>
+
+  <div id="filter-layer"></div>
 
   <script>
     const firebaseConfig = {
@@ -191,3 +205,4 @@
   </script>
 </body>
 </html>
+
