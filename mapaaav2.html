@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Mapa Apocalipsis en Tiempo Real</title>
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <style>
+        html,
+        body,
+        #map {
+            margin: 0;
+            height: 100%;
+        }
+
+        #panel {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(20, 20, 20, 0.9);
+            color: white;
+            padding: 10px;
+            font-family: sans-serif;
+            z-index: 1000;
+        }
+
+        #panel input,
+        #panel button {
+            margin: 4px;
+        }
+
+        .marker-label {
+            background: black;
+            color: white;
+            padding: 2px 4px;
+            font-size: 10px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <!-- Panel para agregar personajes -->
+    <div id="panel">
+        <input type="text"
+               id="name"
+               placeholder="Nombre del personaje">
+        <input type="color"
+               id="color"
+               value="#ff0000">
+        <button onclick="addCharacter()">Agregar personaje</button>
+    </div>
+
+    <script>
+        // Configuración de Firebase (ya personalizada con tu proyecto)
+        const firebaseConfig = {
+            apiKey: "AIzaSyCP1VddmMF11_QwZGMx6ILHbOpSVhYIMk4",
+            authDomain: "mapaj-6017a.firebaseapp.com",
+            projectId: "mapaj-6017a",
+            storageBucket: "mapaj-6017a.firebasestorage.app",
+            messagingSenderId: "411493901671",
+            appId: "1:411493901671:web:5e732ecacbb43226a4fbc2"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const charactersRef = db.collection("characters");
+
+        // Inicializar el mapa
+        const map = L.map('map').setView([-34.6037, -58.3816], 14); // CABA
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        const markers = {};
+
+        // Mostrar personaje en el mapa
+        function renderCharacter(doc) {
+            const data = doc.data();
+
+            if (markers[doc.id]) {
+                // Si ya existe, actualizamos
+                markers[doc.id].setLatLng([data.lat, data.lng]);
+                markers[doc.id].getElement().querySelector('.marker-label').textContent = data.name;
+                markers[doc.id].getElement().style.backgroundColor = data.color;
+            } else {
+                // Si no existe, lo creamos
+                const markerHtml = document.createElement('div');
+                markerHtml.style.backgroundColor = data.color;
+                markerHtml.style.width = '20px';
+                markerHtml.style.height = '20px';
+                markerHtml.style.borderRadius = '50%';
+                markerHtml.style.border = '2px solid black';
+                markerHtml.style.position = 'relative';
+
+                const label = document.createElement('div');
+                label.className = 'marker-label';
+                label.textContent = data.name;
+                label.style.position = 'absolute';
+                label.style.top = '-20px';
+                label.style.left = '-10px';
+                markerHtml.appendChild(label);
+
+                const icon = L.divIcon({ html: markerHtml.outerHTML, className: '' });
+                const marker = L.marker([data.lat, data.lng], { icon: icon, draggable: true }).addTo(map);
+
+                marker.on('dragend', function (e) {
+                    const pos = e.target.getLatLng();
+                    charactersRef.doc(doc.id).update({
+                        lat: pos.lat,
+                        lng: pos.lng
+                    });
+                });
+
+                markers[doc.id] = marker;
+            }
+        }
+
+        // Escuchar cambios en Firebase en tiempo real
+        charactersRef.onSnapshot(snapshot => {
+            snapshot.docChanges().forEach(change => {
+                if (change.type === 'added' || change.type === 'modified') {
+                    renderCharacter(change.doc);
+                } else if (change.type === 'removed') {
+                    if (markers[change.doc.id]) {
+                        map.removeLayer(markers[change.doc.id]);
+                        delete markers[change.doc.id];
+                    }
+                }
+            });
+        });
+
+        // Agregar nuevo personaje
+        function addCharacter() {
+            const name = document.getElementById('name').value || 'Sin nombre';
+            const color = document.getElementById('color').value;
+            const center = map.getCenter();
+
+            charactersRef.add({
+                name: name,
+                color: color,
+                lat: center.lat,
+                lng: center.lng
+            });
+
+            // Limpiar campos
+            document.getElementById('name').value = '';
+        }
+    </script>
+</body>
+
+</html>
