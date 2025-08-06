@@ -9,9 +9,13 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
   <style>
-    html, body, #map {
+    html, body {
       margin: 0;
       height: 100%;
+    }
+    #map {
+      height: 100%;
+      filter: grayscale(100%) brightness(60%) contrast(140%) hue-rotate(30deg) sepia(40%) saturate(130%) blur(0.3px);
     }
     #panel {
       position: absolute;
@@ -27,166 +31,6 @@
       z-index: 1000;
     }
     #add-controls {
-      display: flex;
-      flex-wrap: wrap;
-      margin-bottom: 10px;
-      gap: 5px;
-    }
-    .character-entry {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: #333;
-      padding: 4px 8px;
-      margin: 4px 0;
-      border-radius: 4px;
-    }
-    .character-entry span {
-      flex: 1;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-    }
-    button {
-      cursor: pointer;
-    }
-    .marker-label {
-      background: black;
-      color: white;
-      padding: 2px 4px;
-      font-size: 10px;
-      border-radius: 4px;
-    }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
+      display: flex
 
-  <div id="panel">
-    <div id="add-controls">
-      <input type="text" id="name" placeholder="Nombre del personaje" />
-      <input type="color" id="color" value="#ff0000" />
-      <button onclick="addCharacter()">Agregar personaje</button>
-    </div>
-    <div id="character-list"></div>
-  </div>
 
-  <script>
-    // Firebase config
-    const firebaseConfig = {
-      apiKey: "AIzaSyCP1VddmMF11_QwZGMx6ILHbOpSVhYIMk4",
-      authDomain: "mapaj-6017a.firebaseapp.com",
-      projectId: "mapaj-6017a",
-      storageBucket: "mapaj-6017a.firebasestorage.app",
-      messagingSenderId: "411493901671",
-      appId: "1:411493901671:web:5e732ecacbb43226a4fbc2"
-    };
-
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    const charactersRef = db.collection("characters");
-
-    const map = L.map('map').setView([-34.6037, -58.3816], 14);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
-
-    const markers = {};
-    const characterEntries = {};
-
-    function renderCharacter(doc) {
-      const data = doc.data();
-      const id = doc.id;
-
-      // 🔁 MARCADOR EN MAPA
-      if (!markers[id]) {
-        const markerHtml = document.createElement('div');
-        markerHtml.style.backgroundColor = data.color;
-        markerHtml.style.width = '20px';
-        markerHtml.style.height = '20px';
-        markerHtml.style.borderRadius = '50%';
-        markerHtml.style.border = '2px solid black';
-        markerHtml.style.position = 'relative';
-
-        const label = document.createElement('div');
-        label.className = 'marker-label';
-        label.textContent = data.name;
-        label.style.position = 'absolute';
-        label.style.top = '-20px';
-        label.style.left = '-10px';
-        markerHtml.appendChild(label);
-
-        const icon = L.divIcon({ html: markerHtml.outerHTML, className: '' });
-        const marker = L.marker([data.lat, data.lng], { icon: icon, draggable: true }).addTo(map);
-
-        marker.on('dragend', function(e) {
-          const pos = e.target.getLatLng();
-          charactersRef.doc(id).update({ lat: pos.lat, lng: pos.lng });
-        });
-
-        markers[id] = marker;
-      } else {
-        markers[id].setLatLng([data.lat, data.lng]);
-      }
-
-      // 🔁 ENTRADA EN PANEL
-      if (!characterEntries[id]) {
-        const entry = document.createElement('div');
-        entry.className = 'character-entry';
-        entry.id = `entry-${id}`;
-        entry.innerHTML = `
-          <span>${data.name}</span>
-          <button onclick="locateCharacter('${id}')">📍</button>
-          <button onclick="deleteCharacter('${id}')">❌</button>
-        `;
-        document.getElementById('character-list').appendChild(entry);
-        characterEntries[id] = entry;
-      } else {
-        characterEntries[id].querySelector('span').textContent = data.name;
-      }
-    }
-
-    function locateCharacter(id) {
-      if (markers[id]) {
-        map.setView(markers[id].getLatLng(), 17);
-      }
-    }
-
-    function deleteCharacter(id) {
-      charactersRef.doc(id).delete();
-    }
-
-    charactersRef.onSnapshot(snapshot => {
-      snapshot.docChanges().forEach(change => {
-        const id = change.doc.id;
-        if (change.type === 'added' || change.type === 'modified') {
-          renderCharacter(change.doc);
-        } else if (change.type === 'removed') {
-          if (markers[id]) {
-            map.removeLayer(markers[id]);
-            delete markers[id];
-          }
-          if (characterEntries[id]) {
-            characterEntries[id].remove();
-            delete characterEntries[id];
-          }
-        }
-      });
-    });
-
-    function addCharacter() {
-      const name = document.getElementById('name').value || 'Sin nombre';
-      const color = document.getElementById('color').value;
-      const center = map.getCenter();
-      charactersRef.add({
-        name: name,
-        color: color,
-        lat: center.lat,
-        lng: center.lng
-      });
-      document.getElementById('name').value = '';
-    }
-  </script>
-</body>
-</html>
