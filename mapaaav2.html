@@ -1,15 +1,18 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Mapa Apocalipsis en Tiempo Real</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
   <style>
-    html, body, #map { margin: 0; height: 100%; }
+    html, body, #map {
+      margin: 0;
+      height: 100%;
+    }
     #panel {
       position: absolute;
       bottom: 0;
@@ -61,15 +64,15 @@
 
   <div id="panel">
     <div id="add-controls">
-      <input type="text" id="name" placeholder="Nombre del personaje">
-      <input type="color" id="color" value="#ff0000">
+      <input type="text" id="name" placeholder="Nombre del personaje" />
+      <input type="color" id="color" value="#ff0000" />
       <button onclick="addCharacter()">Agregar personaje</button>
     </div>
     <div id="character-list"></div>
   </div>
 
   <script>
-    // Config Firebase
+    // Firebase config
     const firebaseConfig = {
       apiKey: "AIzaSyCP1VddmMF11_QwZGMx6ILHbOpSVhYIMk4",
       authDomain: "mapaj-6017a.firebaseapp.com",
@@ -94,62 +97,54 @@
 
     function renderCharacter(doc) {
       const data = doc.data();
+      const id = doc.id;
 
-      // Si ya existe, actualizar
-      if (markers[doc.id]) {
-        markers[doc.id].setLatLng([data.lat, data.lng]);
-        const el = markers[doc.id].getElement();
-        if (el) {
-          el.querySelector('.marker-label').textContent = data.name;
-          el.style.backgroundColor = data.color;
-        }
-        const entry = characterEntries[doc.id];
-        if (entry) {
-          entry.querySelector('span').textContent = data.name;
-        }
-        return;
+      // 🔁 MARCADOR EN MAPA
+      if (!markers[id]) {
+        const markerHtml = document.createElement('div');
+        markerHtml.style.backgroundColor = data.color;
+        markerHtml.style.width = '20px';
+        markerHtml.style.height = '20px';
+        markerHtml.style.borderRadius = '50%';
+        markerHtml.style.border = '2px solid black';
+        markerHtml.style.position = 'relative';
+
+        const label = document.createElement('div');
+        label.className = 'marker-label';
+        label.textContent = data.name;
+        label.style.position = 'absolute';
+        label.style.top = '-20px';
+        label.style.left = '-10px';
+        markerHtml.appendChild(label);
+
+        const icon = L.divIcon({ html: markerHtml.outerHTML, className: '' });
+        const marker = L.marker([data.lat, data.lng], { icon: icon, draggable: true }).addTo(map);
+
+        marker.on('dragend', function(e) {
+          const pos = e.target.getLatLng();
+          charactersRef.doc(id).update({ lat: pos.lat, lng: pos.lng });
+        });
+
+        markers[id] = marker;
+      } else {
+        markers[id].setLatLng([data.lat, data.lng]);
       }
 
-      // Crear nuevo marcador
-      const markerHtml = document.createElement('div');
-      markerHtml.style.backgroundColor = data.color;
-      markerHtml.style.width = '20px';
-      markerHtml.style.height = '20px';
-      markerHtml.style.borderRadius = '50%';
-      markerHtml.style.border = '2px solid black';
-      markerHtml.style.position = 'relative';
-
-      const label = document.createElement('div');
-      label.className = 'marker-label';
-      label.textContent = data.name;
-      label.style.position = 'absolute';
-      label.style.top = '-20px';
-      label.style.left = '-10px';
-      markerHtml.appendChild(label);
-
-      const icon = L.divIcon({ html: markerHtml.outerHTML, className: '' });
-      const marker = L.marker([data.lat, data.lng], { icon: icon, draggable: true }).addTo(map);
-
-      marker.on('dragend', function(e) {
-        const pos = e.target.getLatLng();
-        charactersRef.doc(doc.id).update({
-          lat: pos.lat,
-          lng: pos.lng
-        });
-      });
-
-      markers[doc.id] = marker;
-
-      // Crear entrada en el panel
-      const entry = document.createElement('div');
-      entry.className = 'character-entry';
-      entry.innerHTML = `
-        <span>${data.name}</span>
-        <button onclick="locateCharacter('${doc.id}')">📍</button>
-        <button onclick="deleteCharacter('${doc.id}')">❌</button>
-      `;
-      document.getElementById('character-list').appendChild(entry);
-      characterEntries[doc.id] = entry;
+      // 🔁 ENTRADA EN PANEL
+      if (!characterEntries[id]) {
+        const entry = document.createElement('div');
+        entry.className = 'character-entry';
+        entry.id = `entry-${id}`;
+        entry.innerHTML = `
+          <span>${data.name}</span>
+          <button onclick="locateCharacter('${id}')">📍</button>
+          <button onclick="deleteCharacter('${id}')">❌</button>
+        `;
+        document.getElementById('character-list').appendChild(entry);
+        characterEntries[id] = entry;
+      } else {
+        characterEntries[id].querySelector('span').textContent = data.name;
+      }
     }
 
     function locateCharacter(id) {
@@ -165,7 +160,6 @@
     charactersRef.onSnapshot(snapshot => {
       snapshot.docChanges().forEach(change => {
         const id = change.doc.id;
-
         if (change.type === 'added' || change.type === 'modified') {
           renderCharacter(change.doc);
         } else if (change.type === 'removed') {
@@ -185,14 +179,12 @@
       const name = document.getElementById('name').value || 'Sin nombre';
       const color = document.getElementById('color').value;
       const center = map.getCenter();
-
       charactersRef.add({
         name: name,
         color: color,
         lat: center.lat,
         lng: center.lng
       });
-
       document.getElementById('name').value = '';
     }
   </script>
