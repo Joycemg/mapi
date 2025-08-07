@@ -411,23 +411,19 @@
         }
 
         function enablePencil() {
+            document.getElementById('panel').style.display = 'none'; // Oculta panel
             map.dragging.disable();
-            map.on('mousedown', startDrawing);
-            map.on('mousemove', draw);
-            map.on('mouseup', endDrawing);
-            map.on('touchstart', startDrawing);
-            map.on('touchmove', draw);
-            map.on('touchend', endDrawing);
+            map.on('mousedown touchstart', startDrawing);
+            map.on('mousemove touchmove', draw);
+            map.on('mouseup touchend', endDrawing);
         }
 
         function disablePencil() {
+            document.getElementById('panel').style.display = 'block'; // Muestra panel
             map.dragging.enable();
-            map.off('mousedown', startDrawing);
-            map.off('mousemove', draw);
-            map.off('mouseup', endDrawing);
-            map.off('touchstart', startDrawing);
-            map.off('touchmove', draw);
-            map.off('touchend', endDrawing);
+            map.off('mousedown touchstart', startDrawing);
+            map.off('mousemove touchmove', draw);
+            map.off('mouseup touchend', endDrawing);
         }
 
         function startDrawing(e) {
@@ -454,4 +450,3 @@
 </body>
 
 </html>
-
