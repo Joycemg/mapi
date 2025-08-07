@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+      <meta charset="UTF-8" />
+      <title>Mapa Apocalipsis en Tiempo Real</title>
+      <meta name="viewport"
+            content="width=device-width, initial-scale=1.0" />
+      <meta name="apple-mobile-web-app-capable"
+            content="yes">
+
+      <!-- Estilos -->
+      <link rel="stylesheet"
+            href="https://unpkg.com/leaflet/dist/leaflet.css" />
+      <link rel="stylesheet"
+            href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+      <link rel="stylesheet"
+            href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+      <link rel="stylesheet"
+            href="styles.css" />
+
+      <!-- Scripts externos -->
+      <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+      <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+      <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+      <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+      <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+</head>
+
+<body>
+      <div id="map"></div>
+      <div id="blood-frame"></div>
+
+      <div id="panel-toggle-container">
+            <button id="toggle-panel">Pjs</button>
+      </div>
+
+      <div id="panel">
+            <div id="add-controls">
+                  <input type="text"
+                         id="name"
+                         placeholder="Nombre del personaje" />
+                  <input type="color"
+                         id="color"
+                         value="#ff0000" />
+                  <button id="add-button">Agregar pj</button>
+
+            </div>
+            <div id="character-list"></div>
+      </div>
+
+      <script src="config/firebase.js"></script>
+      <script src="modules/map.js"></script>
+      <script src="modules/geocoder.js"></script>
+      <script src="modules/characters.js"></script>
+      <script src="modules/draw.js"></script>
+      <script src="modules/pencil.js"></script>
+      <script src="modules/panel.js"></script>
+</body>
+
+</html>
