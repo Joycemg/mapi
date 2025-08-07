@@ -6,23 +6,29 @@
     <title>Mapa Apocalipsis en Tiempo Real</title>
     <meta name="viewport"
           content="width=device-width, initial-scale=1.0" />
+
+    <!-- Leaflet -->
     <link rel="stylesheet"
           href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <!-- Leaflet Draw -->
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+    <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+
+    <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
     <style>
         html,
-        body {
+        body,
+        #map {
             margin: 0;
             height: 100%;
         }
 
-        #map {
-            height: 100%;
-        }
-
-        /* Filtro SOLO al fondo */
         .filtered-tile {
             filter: grayscale(100%) brightness(60%) contrast(140%) hue-rotate(30deg) sepia(40%) saturate(130%) blur(0.3px);
         }
@@ -76,11 +82,58 @@
             font-size: 10px;
             border-radius: 4px;
         }
+
+        #blood-frame {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: url('marco.png') no-repeat center center;
+            background-size: cover;
+            z-index: 999;
+            opacity: 0.4;
+        }
+
+        .custom-controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1001;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 6px 10px;
+            border-radius: 6px;
+            display: flex;
+            gap: 8px;
+            color: white;
+        }
+
+        .leaflet-bar a.custom-pencil {
+            background-color: white;
+            font-size: 18px;
+            line-height: 26px;
+            text-align: center;
+        }
+
+        .leaflet-bar a.custom-pencil.active {
+            background-color: #ddd;
+        }
     </style>
 </head>
 
 <body>
     <div id="map"></div>
+    <div id="blood-frame"></div>
+
+    <div class="custom-controls">
+        <label for="pencilColor">Color del lápiz:</label>
+        <select id="pencilColor">
+            <option value="black">🖤 Negro</option>
+            <option value="white">🤍 Blanco</option>
+            <option value="red">❤️ Rojo</option>
+        </select>
+    </div>
 
     <div id="panel">
         <div id="add-controls">
@@ -104,18 +157,19 @@
             messagingSenderId: "411493901671",
             appId: "1:411493901671:web:5e732ecacbb43226a4fbc2"
         };
-
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
         const charactersRef = db.collection("characters");
 
-        const map = L.map('map').setView([-34.6037, -58.3816], 14);
+        const map = L.map('map', {
+            center: [-34.6037, -58.3816],
+            zoom: 4,
+            minZoom: 4
+        });
 
-        // Tile layer con clase personalizada para aplicar filtro solo al fondo
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap contributors',
-            className: 'filtered-tile' // <- aquí se aplica el filtro CSS
+            className: 'filtered-tile',
+            attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
         const markers = {};
@@ -211,10 +265,108 @@
             });
             document.getElementById('name').value = '';
         }
+
+        // === Leaflet Draw ===
+        const drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+
+        const drawControl = new L.Control.Draw({
+            draw: {
+                polygon: false,
+                polyline: false,
+                marker: false,
+                circlemarker: false,
+                rectangle: { shapeOptions: { color: '#ffbb00' } },
+                circle: { shapeOptions: { color: '#00cc99' } }
+            },
+            edit: {
+                featureGroup: drawnItems,
+                remove: true
+            }
+        });
+        map.addControl(drawControl);
+
+        map.on(L.Draw.Event.CREATED, function (e) {
+            drawnItems.addLayer(e.layer);
+        });
+
+        // === Lápiz personalizado ===
+        let isDrawing = false;
+        let currentLine = null;
+
+        const PencilControl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd: function () {
+                const container = L.DomUtil.create('div', 'leaflet-bar');
+                const button = L.DomUtil.create('a', 'custom-pencil', container);
+                button.innerHTML = '✏️';
+                button.href = '#';
+
+                button.onclick = function (e) {
+                    e.preventDefault();
+                    if (button.classList.contains('active')) {
+                        button.classList.remove('active');
+                        disablePencil();
+                    } else {
+                        button.classList.add('active');
+                        disableDraw();
+                        enablePencil();
+                    }
+                };
+                return container;
+            }
+        });
+        map.addControl(new PencilControl());
+
+        function disableDraw() {
+            document.querySelectorAll('.leaflet-draw-toolbar a').forEach(btn => {
+                btn.classList.remove('leaflet-draw-toolbar-button-enabled');
+            });
+        }
+
+        function enablePencil() {
+            map.dragging.disable();
+            map.on('mousedown', startDrawing);
+            map.on('mousemove', draw);
+            map.on('mouseup', endDrawing);
+            map.on('touchstart', startDrawing);
+            map.on('touchmove', draw);
+            map.on('touchend', endDrawing);
+        }
+
+        function disablePencil() {
+            map.dragging.enable();
+            map.off('mousedown', startDrawing);
+            map.off('mousemove', draw);
+            map.off('mouseup', endDrawing);
+            map.off('touchstart', startDrawing);
+            map.off('touchmove', draw);
+            map.off('touchend', endDrawing);
+        }
+
+        function startDrawing(e) {
+            isDrawing = true;
+            const latlng = e.latlng || map.mouseEventToLatLng(e.originalEvent);
+            const color = document.getElementById('pencilColor').value || 'black';
+            currentLine = L.polyline([latlng], {
+                color: color,
+                weight: 3
+            }).addTo(drawnItems);
+        }
+
+        function draw(e) {
+            if (!isDrawing || !currentLine) return;
+            const latlng = e.latlng || map.mouseEventToLatLng(e.originalEvent);
+            currentLine.addLatLng(latlng);
+        }
+
+        function endDrawing() {
+            isDrawing = false;
+            currentLine = null;
+        }
     </script>
 </body>
 
 </html>
-
 
 
