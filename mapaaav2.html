@@ -36,8 +36,8 @@
             height: 100%;
             overscroll-behavior: none;
             touch-action: none;
-              overscroll-behavior-x: none;
-  touch-action: pan-y;
+            overscroll-behavior-x: none;
+            touch-action: pan-y;
 
 
         }
@@ -157,6 +157,27 @@
             gap: 4px;
             margin-top: 4px;
         }
+
+        #panel-toggle-container {
+            position: absolute;
+            top: 52px;
+            /* justo debajo del buscador */
+            right: 10px;
+            /* 👈 lo posiciona hacia la derecha */
+            z-index: 1001;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 4px;
+            padding: 2px 6px;
+        }
+
+        #toggle-panel {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 2px 4px;
+        }
     </style>
 </head>
 
@@ -165,7 +186,9 @@
     <div id="blood-frame"></div>
 
 
-
+    <div id="panel-toggle-container">
+        <button id="toggle-panel">Pjs</button>
+    </div>
     <div id="panel">
         <div id="add-controls">
             <input type="text"
@@ -191,11 +214,17 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
         const charactersRef = db.collection("characters");
+        const drawingsRef = db.collection("drawings");
+
 
         const map = L.map('map', {
             center: [36.8529300, -75.9779900],
             zoom: 4,
-            minZoom: 4
+            minZoom: 4,
+            zoomControl: false,
+            zoomSnap: 2,
+            preferCanvas: false,
+            attributionControl: false
         });
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -340,6 +369,21 @@
         const drawnItems = new L.FeatureGroup();
         map.addLayer(drawnItems);
 
+        drawingsRef.get().then(snapshot => {
+            snapshot.forEach(doc => {
+                const data = doc.data();
+
+                const layer = L.geoJSON(data.geometry, {
+                    style: data.style
+                });
+
+                layer.eachLayer(l => {
+                    drawnItems.addLayer(l);
+                });
+            });
+        });
+
+
         const drawControl = new L.Control.Draw({
             draw: {
                 polygon: false,
@@ -357,7 +401,21 @@
         map.addControl(drawControl);
 
         map.on(L.Draw.Event.CREATED, function (e) {
-            drawnItems.addLayer(e.layer);
+            const layer = e.layer;
+            drawnItems.addLayer(layer);
+
+            const geojson = layer.toGeoJSON();
+
+            drawingsRef.add({
+                type: "shape",
+                geometry: geojson.geometry,
+                style: {
+                    color: layer.options.color || "#000000",
+                    weight: layer.options.weight || 2,
+                    fillOpacity: layer.options.fillOpacity || 0.2
+                },
+                timestamp: Date.now()
+            });
         });
 
         // === Lápiz personalizado ===
@@ -450,10 +508,38 @@
 
         function endDrawing() {
             isDrawing = false;
+
+            if (currentLine) {
+                const geojson = currentLine.toGeoJSON();
+
+                drawingsRef.add({
+                    type: "pencil",
+                    geometry: geojson.geometry,
+                    style: {
+                        color: selectedColor,
+                        weight: 2
+                    },
+                    timestamp: Date.now()
+                });
+            }
+
             currentLine = null;
         }
+
+
+        const toggleBtn = document.getElementById('toggle-panel');
+        const panel = document.getElementById('panel');
+        let panelVisible = true;
+
+        toggleBtn.addEventListener('click', () => {
+            panelVisible = !panelVisible;
+            panel.style.display = panelVisible ? 'block' : 'none';
+            toggleBtn.textContent = panelVisible ? 'Pj' : 'pj';
+        });
+
+
+
     </script>
 </body>
 
 </html>
-
