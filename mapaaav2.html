@@ -374,7 +374,10 @@
                 const data = doc.data();
 
                 const layer = L.geoJSON(data.geometry, {
-                    style: data.style
+                    style: data.style,
+                    pointToLayer: (feature, latlng) => {
+                        return L.circleMarker(latlng, data.style);
+                    }
                 });
 
                 layer.eachLayer(l => {
@@ -382,6 +385,7 @@
                 });
             });
         });
+
 
 
         const drawControl = new L.Control.Draw({
@@ -407,14 +411,13 @@
             const geojson = layer.toGeoJSON();
 
             drawingsRef.add({
-                type: "shape",
+                type: "draw",
                 geometry: geojson.geometry,
                 style: {
                     color: layer.options.color || "#000000",
                     weight: layer.options.weight || 2,
                     fillOpacity: layer.options.fillOpacity || 0.2
                 },
-                timestamp: Date.now()
             });
         });
 
@@ -519,7 +522,6 @@
                         color: selectedColor,
                         weight: 2
                     },
-                    timestamp: Date.now()
                 });
             }
 
