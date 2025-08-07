@@ -6,6 +6,8 @@
     <title>Mapa Apocalipsis en Tiempo Real</title>
     <meta name="viewport"
           content="width=device-width, initial-scale=1.0" />
+    <meta name="apple-mobile-web-app-capable"
+          content="yes">
 
     <!-- Leaflet -->
     <link rel="stylesheet"
@@ -16,6 +18,11 @@
     <link rel="stylesheet"
           href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
     <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
 
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -78,9 +85,9 @@
         .marker-label {
             background: black;
             color: white;
-            padding: 2px 4px;
-            font-size: 10px;
-            border-radius: 4px;
+            padding: 2px 3px;
+            font-size: 8px;
+            border-radius: 2px;
         }
 
         #blood-frame {
@@ -93,31 +100,56 @@
             background: url('marco.png') no-repeat center center;
             background-size: cover;
             z-index: 999;
-            opacity: 0.4;
+            opacity: 0.2;
         }
 
-        .custom-controls {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            z-index: 1001;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 6px 10px;
-            border-radius: 6px;
+        .leaflet-bar .pencil-tools .pencil-color {
             display: flex;
-            gap: 8px;
-            color: white;
+            align-items: center;
+            gap: 4px;
+            padding: 4px;
+            background: white;
         }
 
-        .leaflet-bar a.custom-pencil {
-            background-color: white;
-            font-size: 18px;
-            line-height: 26px;
-            text-align: center;
+        .pencil-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 1px solid #888;
+            cursor: pointer;
+        }
+
+        .pencil-color.white {
+            background: white;
+        }
+
+        .pencil-color.black {
+            background: black;
+        }
+
+        .pencil-color.red {
+            background: red;
         }
 
         .leaflet-bar a.custom-pencil.active {
             background-color: #ddd;
+        }
+
+        .pencil-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: white;
+            padding: 0px;
+        }
+
+        .color-selector {
+            display: none;
+            /* Oculto por defecto */
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            margin-top: 4px;
         }
     </style>
 </head>
@@ -126,14 +158,7 @@
     <div id="map"></div>
     <div id="blood-frame"></div>
 
-    <div class="custom-controls">
-        <label for="pencilColor">Color del lápiz:</label>
-        <select id="pencilColor">
-            <option value="black">🖤 Negro</option>
-            <option value="white">🤍 Blanco</option>
-            <option value="red">❤️ Rojo</option>
-        </select>
-    </div>
+
 
     <div id="panel">
         <div id="add-controls">
@@ -143,7 +168,7 @@
             <input type="color"
                    id="color"
                    value="#ff0000" />
-            <button onclick="addCharacter()">Agregar personaje</button>
+            <button onclick="addCharacter()">Agregar pj</button>
         </div>
         <div id="character-list"></div>
     </div>
@@ -162,18 +187,57 @@
         const charactersRef = db.collection("characters");
 
         const map = L.map('map', {
-            center: [-34.6037, -58.3816],
+            center: [36.8529300, -75.9779900],
             zoom: 4,
             minZoom: 4
         });
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            className: 'filtered-tile',
-            attribution: '&copy; OpenStreetMap contributors'
+            attribution: '&copy; Stadia Maps, OpenMapTiles & OpenStreetMap contributors',
+            className: 'filtered-tile'
         }).addTo(map);
 
         const markers = {};
         const characterEntries = {};
+
+
+        let searchLayer;
+
+        L.Control.geocoder({
+            defaultMarkGeocode: false
+        })
+            .on('markgeocode', function (e) {
+                const placeName = e.geocode.name;
+
+                const url = `https://nominatim.openstreetmap.org/search?format=geojson&polygon_geojson=1&q=${encodeURIComponent(placeName)}`;
+
+                fetch(url)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.features.length > 0) {
+                            const feature = data.features[0];
+
+                            // Elimina capa anterior
+                            if (searchLayer) {
+                                map.removeLayer(searchLayer);
+                            }
+
+                            // Dibuja solo el borde blanco
+                            searchLayer = L.geoJSON(feature.geometry, {
+                                style: {
+                                    color: 'white',
+                                    weight: 2,
+                                    fillOpacity: 0
+                                }
+                            }).addTo(map);
+
+                            map.fitBounds(searchLayer.getBounds());
+                        } else {
+                            alert('No se encontró el territorio.');
+                        }
+                    });
+            })
+            .addTo(map);
 
         function renderCharacter(doc) {
             const data = doc.data();
@@ -293,30 +357,52 @@
         // === Lápiz personalizado ===
         let isDrawing = false;
         let currentLine = null;
+        let selectedColor = 'black'; // Color por defecto
 
         const PencilControl = L.Control.extend({
             options: { position: 'topleft' },
             onAdd: function () {
-                const container = L.DomUtil.create('div', 'leaflet-bar');
-                const button = L.DomUtil.create('a', 'custom-pencil', container);
+                const wrapper = L.DomUtil.create('div', 'leaflet-bar pencil-wrapper');
+
+                const button = L.DomUtil.create('a', 'custom-pencil', wrapper);
                 button.innerHTML = '✏️';
                 button.href = '#';
+                button.style.backgroundColor = selectedColor;
 
+                // Contenedor de los colores
+                const colorSelector = L.DomUtil.create('div', 'color-selector', wrapper);
+
+                ['black', 'white', 'red'].forEach(color => {
+                    const colorBtn = L.DomUtil.create('div', `pencil-color ${color}`, colorSelector);
+                    colorBtn.onclick = () => {
+                        selectedColor = color;
+                        button.style.backgroundColor = color; // 👈 cambia el color del botón lápiz
+                    };
+                });
+
+                // Comportamiento al hacer clic en el lápiz
                 button.onclick = function (e) {
                     e.preventDefault();
                     if (button.classList.contains('active')) {
                         button.classList.remove('active');
+                        colorSelector.style.display = 'none';
                         disablePencil();
+                        button.style.backgroundColor = selectedColor; // 🔁 vuelve al color original
                     } else {
                         button.classList.add('active');
+                        colorSelector.style.display = 'flex';
+                        button.style.backgroundColor = "selectedColor";
                         disableDraw();
                         enablePencil();
                     }
                 };
-                return container;
+
+                return wrapper;
             }
         });
+
         map.addControl(new PencilControl());
+
 
         function disableDraw() {
             document.querySelectorAll('.leaflet-draw-toolbar a').forEach(btn => {
@@ -347,10 +433,10 @@
         function startDrawing(e) {
             isDrawing = true;
             const latlng = e.latlng || map.mouseEventToLatLng(e.originalEvent);
-            const color = document.getElementById('pencilColor').value || 'black';
+            const color = selectedColor || 'black';
             currentLine = L.polyline([latlng], {
                 color: color,
-                weight: 3
+                weight: 2
             }).addTo(drawnItems);
         }
 
@@ -368,5 +454,4 @@
 </body>
 
 </html>
-
 
