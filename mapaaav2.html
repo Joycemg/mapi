@@ -34,6 +34,10 @@
         #map {
             margin: 0;
             height: 100%;
+            overscroll-behavior: none;
+            touch-action: none;
+
+
         }
 
         .filtered-tile {
@@ -225,8 +229,8 @@
                             // Dibuja solo el borde blanco
                             searchLayer = L.geoJSON(feature.geometry, {
                                 style: {
-                                    color: 'white',
-                                    weight: 2,
+                                    color: 'black',
+                                    weight: 1,
                                     fillOpacity: 0
                                 }
                             }).addTo(map);
