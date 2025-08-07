@@ -1,4 +1,6 @@
 // modules/characters.js
+import { map } from './Map.js';
+import { charactersRef } from '../config/firebase.js';
 
 const markers = {};
 const characterEntries = {};
@@ -21,11 +23,7 @@ const renderCharacter = (doc) => {
         const label = document.createElement('div');
         label.className = 'marker-label';
         label.textContent = data.name;
-        Object.assign(label.style, {
-            position: 'absolute',
-            top: '-20px',
-            left: '-10px'
-        });
+        Object.assign(label.style, { position: 'absolute', top: '-20px', left: '-10px' });
 
         markerHtml.appendChild(label);
 
@@ -47,40 +45,40 @@ const renderCharacter = (doc) => {
         entry.className = 'character-entry';
         entry.id = `entry-${id}`;
         entry.innerHTML = `
-            <span>${data.name}</span>
-            <button onclick="locateCharacter('${id}')">📍</button>
-            <button onclick="deleteCharacter('${id}')">❌</button>
-        `;
-        document.getElementById('character-list').appendChild(entry);
+      <span>${data.name}</span>
+      <button onclick="locateCharacter('${id}')">📍</button>
+      <button onclick="deleteCharacter('${id}')">❌</button>
+    `;
+        document.getElementById('character-list')?.appendChild(entry);
         characterEntries[id] = entry;
     } else {
         characterEntries[id].querySelector('span').textContent = data.name;
     }
 };
 
-const locateCharacter = (id) => {
-    if (markers[id]) {
-        map.setView(markers[id].getLatLng(), 17);
-    }
-};
+function locateCharacter(id) {
+    if (markers[id]) map.setView(markers[id].getLatLng(), 17);
+}
 
-const deleteCharacter = (id) => {
+function deleteCharacter(id) {
     charactersRef.doc(id).delete();
-};
+}
 
-const addCharacter = () => {
+window.locateCharacter = locateCharacter;
+window.deleteCharacter = deleteCharacter;
+
+function addCharacter() {
     const nameInput = document.getElementById('name');
     const colorInput = document.getElementById('color');
-    const name = nameInput.value.trim() || 'Sin nombre';
-    const color = colorInput.value;
+    const name = nameInput?.value.trim() || 'Sin nombre';
+    const color = colorInput?.value || '#000000';
     const { lat, lng } = map.getCenter();
 
     charactersRef.add({ name, color, lat, lng });
+    if (nameInput) nameInput.value = '';
+}
 
-    nameInput.value = '';
-};
-
-document.getElementById('add-button').addEventListener('click', addCharacter);
+document.getElementById('add-button')?.addEventListener('click', addCharacter);
 
 charactersRef.onSnapshot((snapshot) => {
     snapshot.docChanges().forEach((change) => {
@@ -91,15 +89,8 @@ charactersRef.onSnapshot((snapshot) => {
         }
 
         if (change.type === 'removed') {
-            if (markers[id]) {
-                map.removeLayer(markers[id]);
-                delete markers[id];
-            }
-
-            if (characterEntries[id]) {
-                characterEntries[id].remove();
-                delete characterEntries[id];
-            }
+            if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+            if (characterEntries[id]) { characterEntries[id].remove(); delete characterEntries[id]; }
         }
     });
 });

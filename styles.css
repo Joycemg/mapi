@@ -142,3 +142,21 @@ button {
   cursor: pointer;
   padding: 2px 4px;
 }
+
+#panel.is-hidden { display: none !important; }
+/* opcional: ubicar el botón debajo del buscador */
+.panel-toggle-wrap { margin-top: 38px; }
+.panel-toggle-btn {
+  display: inline-block; width: 32px; height: 32px; line-height: 32px;
+  text-align: center; font-weight: 700; text-decoration: none; user-select: none;
+}
+
+.leaflet-container { touch-action: pan-x pan-y; } /* por defecto */
+.drawing .leaflet-container { touch-action: none; } /* si quisieras usar una clase */
+
+#blood-frame { pointer-events:none !important; }
+
+
+/* que el panel no invada el mapa cuando está visible */
+#panel { z-index: 1100; }
+.leaflet-container { z-index: 1; }

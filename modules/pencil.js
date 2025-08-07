@@ -1,169 +1,173 @@
 // modules/pencil.js
+import { map } from './Map.js';
+import { drawnItems } from './Draw.js';
+import { db } from '../config/firebase.js';
+import { hidePanel, showPanel } from './panel.js';
 
 let isDrawing = false;
 let currentLine = null;
+let currentRef = null;
+let points = []; // L.LatLng[]
+let lastUpdate = 0;
+const UPDATE_EVERY_MS = 100;
+
 let selectedColor = 'black';
 let selectedWeight = 2;
-const drawnFromFirebase = new Set();
 let pencilButton = null;
 let eraserButton = null;
-let mouseDownOnMap = false;
 
 const PencilControl = L.Control.extend({
     options: { position: 'topleft' },
     onAdd() {
         const wrapper = L.DomUtil.create('div', 'leaflet-bar pencil-wrapper');
-
-        pencilButton = createButton('✏️', 'custom-pencil', 'Herramienta lápiz', wrapper, handlePencilClick);
-        eraserButton = createButton('🧽', 'custom-eraser', 'Goma para borrar trazos', wrapper, handleEraserClick);
-
-        const colorSelector = createColorSelector(wrapper);
-        const weightSelector = createWeightSelector(wrapper);
-
-        wrapper.append(colorSelector, weightSelector);
+        pencilButton = createBtn('✏️', 'custom-pencil', 'Herramienta lápiz', wrapper, handlePencilClick);
+        eraserButton = createBtn('🧽', 'custom-eraser', 'Goma', wrapper, handleEraserClick);
+        wrapper.append(makeColorSel(wrapper), makeWeightSel(wrapper));
+        toggleUI('none');
         return wrapper;
     }
 });
-
 map.addControl(new PencilControl());
 
-function createButton(icon, className, title, container, clickHandler) {
-    const button = L.DomUtil.create('a', className, container);
-    button.innerHTML = icon;
-    button.href = '#';
-    button.title = title;
-    button.onclick = e => {
-        e.preventDefault();
-        clickHandler();
-    };
-    return button;
+function createBtn(icon, cls, title, container, onClick) {
+    const a = L.DomUtil.create('a', cls, container);
+    a.innerHTML = icon; a.href = '#'; a.title = title;
+    a.onclick = (e) => { e.preventDefault(); onClick(); };
+    return a;
 }
-
-function createColorSelector(container) {
-    const selector = L.DomUtil.create('div', 'color-selector', container);
-    ['black', 'white', 'red'].forEach(color => {
-        const btn = L.DomUtil.create('div', `pencil-color ${color}`, selector);
-        btn.onclick = () => {
-            selectedColor = color;
-            pencilButton.style.backgroundColor = color;
-        };
+function makeColorSel(container) {
+    const s = L.DomUtil.create('div', 'color-selector', container);
+    ['black', 'white', 'red'].forEach(c => {
+        const btn = L.DomUtil.create('div', `pencil-color ${c}`, s);
+        btn.onclick = () => { selectedColor = c; if (pencilButton) pencilButton.style.backgroundColor = c; };
     });
-    return selector;
+    return s;
 }
-
-function createWeightSelector(container) {
-    const selector = L.DomUtil.create('div', 'weight-selector', container);
-    const weights = [
-        { w: 2, label: 'Fino' },
-        { w: 4, label: 'Medio' },
-        { w: 6, label: 'Grueso' }
-    ];
-
-    weights.forEach(({ w, label }) => {
-        const btn = L.DomUtil.create('div', 'weight-option', selector);
-        btn.innerHTML = `<div style="width:30px;height:0;border-top:${w}px solid black;margin-bottom:2px"></div>${label}`;
-        btn.onclick = () => {
-            selectedWeight = w;
-            [...selector.children].forEach(child => child.classList.remove('selected'));
-            btn.classList.add('selected');
-        };
+function makeWeightSel(container) {
+    const s = L.DomUtil.create('div', 'weight-selector', container);
+    [{ w: 2, l: 'Fino' }, { w: 4, l: 'Medio' }, { w: 6, l: 'Grueso' }].forEach(({ w, l }) => {
+        const btn = L.DomUtil.create('div', 'weight-option', s);
+        btn.innerHTML = `<div style="width:30px;height:0;border-top:${w}px solid black;margin-bottom:2px"></div>${l}`;
+        btn.onclick = () => { selectedWeight = w;[...s.children].forEach(c => c.classList.remove('selected')); btn.classList.add('selected'); };
     });
-
-    return selector;
+    return s;
 }
-
-function handlePencilClick() {
-    disableEraser();
-    pencilButton.classList.contains('active') ? disablePencil() : enablePencil();
+function toggleUI(d) {
+    const p = pencilButton?.parentElement;
+    p?.querySelector('.color-selector') && (p.querySelector('.color-selector').style.display = d);
+    p?.querySelector('.weight-selector') && (p.querySelector('.weight-selector').style.display = d);
 }
+function handlePencilClick() { disableEraser(); pencilButton.classList.contains('active') ? disablePencil() : enablePencil(); }
+function handleEraserClick() { disablePencil(); eraserButton.classList.contains('active') ? disableEraser() : enableEraser(); }
 
-function handleEraserClick() {
-    disablePencil();
-    eraserButton.classList.contains('active') ? disableEraser() : enableEraser();
-}
-
+/* ======= LÁPIZ (eventos Leaflet) ======= */
 function enablePencil() {
     pencilButton.classList.add('active');
     pencilButton.style.backgroundColor = selectedColor;
     toggleUI('flex');
     map.dragging.disable();
-    document.getElementById('panel').style.display = 'none';
+    hidePanel('panel');
+    map.getContainer().style.touchAction = 'none';
 
-    const container = map.getContainer();
-    container.addEventListener('mousedown', onMouseDown);
-    container.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+    map.on('mousedown', onDown);
+    map.on('mousemove', onMove);
+    L.DomEvent.on(document, 'mouseup', onUp);
+    map.on('touchstart', onDown);
+    map.on('touchmove', onMove);
+    map.on('touchend', onUp);
 }
-
 function disablePencil() {
     pencilButton.classList.remove('active');
     pencilButton.style.backgroundColor = selectedColor;
     toggleUI('none');
     map.dragging.enable();
-    document.getElementById('panel').style.display = 'block';
+    showPanel('panel');
+    map.getContainer().style.touchAction = '';
 
-    const container = map.getContainer();
-    container.removeEventListener('mousedown', onMouseDown);
-    container.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
+    map.off('mousedown', onDown);
+    map.off('mousemove', onMove);
+    L.DomEvent.off(document, 'mouseup', onUp);
+    map.off('touchstart', onDown);
+    map.off('touchmove', onMove);
+    map.off('touchend', onUp);
 
-    isDrawing = false;
-    currentLine = null;
-    mouseDownOnMap = false;
+    isDrawing = false; currentLine = null; currentRef = null; points = [];
 }
 
-function toggleUI(display) {
-    const parent = pencilButton.parentElement;
-    const colorSelector = parent.querySelector('.color-selector');
-    const weightSelector = parent.querySelector('.weight-selector');
-    if (colorSelector) colorSelector.style.display = display;
-    if (weightSelector) weightSelector.style.display = display;
+function goodStart(ev) {
+    const t = ev.originalEvent?.target;
+    if (!t) return true;
+    if (t.closest?.('.leaflet-marker-icon')) return false;
+    if (t.closest?.('.leaflet-popup')) return false;
+    if (t.closest?.('.leaflet-control')) return false;
+    return true;
 }
 
-function onMouseDown(e) {
-    const target = e.originalEvent?.target || e.target;
-    if (
-        target.closest('.leaflet-marker-icon') ||
-        target.closest('.leaflet-popup') ||
-        target.closest('.leaflet-control') ||
-        target.closest('.leaflet-interactive')
-    ) return;
+function onDown(ev) {
+    if (ev.originalEvent?.button !== undefined && ev.originalEvent.button !== 0) return;
+    if (!goodStart(ev)) return;
+    L.DomEvent.preventDefault(ev.originalEvent || ev);
+    L.DomEvent.stopPropagation(ev.originalEvent || ev);
 
-    if (e.originalEvent?.button !== 0 && e.button !== 0) return;
-
-    mouseDownOnMap = true;
     isDrawing = true;
-    const latlng = map.mouseEventToLatLng(e);
-    currentLine = L.polyline([latlng], {
-        color: selectedColor,
-        weight: selectedWeight
-    }).addTo(drawnItems);
-}
+    const start = ev.latlng || map.mouseEventToLatLng(ev.originalEvent);
+    points = [start];
 
-function onMouseMove(e) {
-    if (!isDrawing || !currentLine || !mouseDownOnMap || e.buttons !== 1) return;
-    currentLine.addLatLng(map.mouseEventToLatLng(e));
-}
+    const id = `pencil-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    currentRef = db.collection('shapes').doc(id);
 
-function onMouseUp() {
-    if (!currentLine || !mouseDownOnMap) return;
+    const style = { color: selectedColor, weight: selectedWeight };
+    const geoPoints = [new firebase.firestore.GeoPoint(start.lat, start.lng)];
 
-    const geo = currentLine.toGeoJSON().geometry;
-    const style = currentLine.options;
-    const id = `pencil-${Date.now()}`;
+    currentRef.set({ type: 'pencil', points: geoPoints, style, updatedAt: Date.now() });
 
-    db.collection("shapes").doc(id).set({ type: "pencil", data: geo, style });
+    currentLine = L.polyline(points, style);
     currentLine._firebaseId = id;
-
-    isDrawing = false;
-    currentLine = null;
-    mouseDownOnMap = false;
+    drawnItems.addLayer(currentLine);
+    lastUpdate = 0;
 }
 
+function onMove(ev) {
+    if (!isDrawing || !currentLine) return;
+    const ll = ev.latlng || map.mouseEventToLatLng(ev.originalEvent);
+    if (!ll) return;
+    L.DomEvent.preventDefault(ev.originalEvent || ev);
+
+    currentLine.addLatLng(ll);
+    points.push(ll);
+    maybePush();
+}
+
+function onUp(ev) {
+    if (!isDrawing) return;
+    L.DomEvent.preventDefault(ev?.originalEvent || ev);
+    isDrawing = false;
+
+    pushAll(); // guardar la geometría final
+    currentRef = null;
+    points = [];
+}
+
+function geoPointArray() {
+    return points.map(ll => new firebase.firestore.GeoPoint(ll.lat, ll.lng));
+}
+function pushAll() {
+    if (!currentRef) return;
+    currentRef.set({ points: geoPointArray(), updatedAt: Date.now() }, { merge: true });
+}
+function maybePush() {
+    const now = Date.now();
+    if (!currentRef || now - lastUpdate < UPDATE_EVERY_MS) return;
+    lastUpdate = now;
+    currentRef.update({ points: geoPointArray(), updatedAt: now })
+        .catch(() => currentRef.set({ points: geoPointArray(), updatedAt: now }, { merge: true }));
+}
+
+/* ======= GOMA ======= */
 function enableEraser() {
     eraserButton.classList.add('active');
     map.dragging.disable();
-    document.getElementById('panel').style.display = 'none';
+    hidePanel('panel');
     map.getContainer().style.cursor = 'crosshair';
 
     drawnItems.eachLayer(layer => {
@@ -174,49 +178,20 @@ function enableEraser() {
         }
     });
 }
-
 function disableEraser() {
     eraserButton.classList.remove('active');
     map.dragging.enable();
-    document.getElementById('panel').style.display = 'block';
+    showPanel('panel');
     map.getContainer().style.cursor = '';
 
     drawnItems.eachLayer(layer => {
         layer.off('click', onEraseClick);
-        layer.off('mouseover');
-        layer.off('mouseout');
-        layer.setStyle({ opacity: 1 });
+        layer.off('mouseover'); layer.off('mouseout');
+        layer.setStyle?.({ opacity: 1 });
     });
 }
-
 function onEraseClick(e) {
-    const layer = e.target;
-    const id = layer._firebaseId;
-    if (id) db.collection("shapes").doc(id).delete();
-    drawnItems.removeLayer(layer);
+    const id = e.target._firebaseId;
+    if (id) db.collection('shapes').doc(id).delete();
+    drawnItems.removeLayer(e.target);
 }
-
-db.collection("shapes").onSnapshot(snapshot => {
-    snapshot.docChanges().forEach(change => {
-        const id = change.doc.id;
-        if (change.type === "added") {
-            if (drawnFromFirebase.has(id)) return;
-            drawnFromFirebase.add(id);
-
-            const shape = change.doc.data();
-            if (shape.type === "pencil") {
-                const layer = L.geoJSON({ type: "Feature", geometry: shape.data }, {
-                    style: shape.style
-                }).getLayers()[0];
-                layer._firebaseId = id;
-                drawnItems.addLayer(layer);
-            }
-        } else if (change.type === "removed") {
-            drawnItems.eachLayer(layer => {
-                if (layer._firebaseId === id) {
-                    drawnItems.removeLayer(layer);
-                }
-            });
-        }
-    });
-});

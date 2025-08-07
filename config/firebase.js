@@ -1,5 +1,4 @@
 // config/firebase.js
-
 const firebaseConfig = {
     apiKey: "AIzaSyCP1VddmMF11_QwZGMx6ILHbOpSVhYIMk4",
     authDomain: "mapaj-6017a.firebaseapp.com",
@@ -9,6 +8,7 @@ const firebaseConfig = {
     appId: "1:411493901671:web:5e732ecacbb43226a4fbc2"
 };
 
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const charactersRef = db.collection("characters");
+if (!firebase.apps?.length) firebase.initializeApp(firebaseConfig);
+
+export const db = firebase.firestore();
+export const charactersRef = db.collection("characters");

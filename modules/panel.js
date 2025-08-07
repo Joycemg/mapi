@@ -1,12 +1,10 @@
 // modules/panel.js
+function getPanel(id = 'panel') { return document.getElementById(id); }
 
-const toggleBtn = document.getElementById('toggle-panel');
-const panel = document.getElementById('panel');
-
-let panelVisible = true;
-
-toggleBtn?.addEventListener('click', () => {
-    panelVisible = !panelVisible;
-    panel.style.display = panelVisible ? 'block' : 'none';
-    toggleBtn.textContent = panelVisible ? 'Pj' : 'pj';
-});
+export function showPanel(id = 'panel') { getPanel(id)?.classList.remove('is-hidden'); }
+export function hidePanel(id = 'panel') { getPanel(id)?.classList.add('is-hidden'); }
+export function togglePanel(id = 'panel') {
+    const el = getPanel(id);
+    if (!el) return console.warn(`No se encontró panel #${id}`);
+    el.classList.toggle('is-hidden');
+}
