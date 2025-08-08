@@ -69,6 +69,9 @@ const makeChip = (parent) => {
             b.click();
         }
     });
+    // 🔒 no dejar que el touch llegue al mapa (pero sin cancelar el click)
+    L.DomEvent.on(b, 'pointerdown', (e) => e.stopPropagation());
+    L.DomEvent.on(b, 'touchstart', (e) => e.stopPropagation());
     return b;
 };
 
@@ -83,12 +86,16 @@ const PencilControl = L.Control.extend({
         L.DomEvent.disableScrollPropagation(wrapper);
         setStyles(wrapper, { position: 'relative', overflow: 'visible' });
 
-        // 🛡️ Bloqueo extra de eventos táctiles que se filtran al mapa
-        L.DomEvent.on(wrapper, 'pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); });
-        L.DomEvent.on(wrapper, 'touchstart', (e) => { e.preventDefault(); e.stopPropagation(); });
+        // 🔒 Bloqueo suave: evita que el mapa reciba el evento, pero deja vivir el click
+        L.DomEvent.on(wrapper, 'pointerdown', (e) => e.stopPropagation());
+        L.DomEvent.on(wrapper, 'touchstart', (e) => e.stopPropagation());
 
         pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick, true);
         eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick, false);
+
+        // Guard suave en los botones (anti-fantasma)
+        guardBtn(pencilButton);
+        guardBtn(eraserButton);
 
         // Panel dropdown (compacto)
         configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
@@ -107,6 +114,8 @@ const PencilControl = L.Control.extend({
         });
         L.DomEvent.disableClickPropagation(configPanel);
         L.DomEvent.disableScrollPropagation(configPanel);
+        L.DomEvent.on(configPanel, 'pointerdown', (e) => e.stopPropagation());
+        L.DomEvent.on(configPanel, 'touchstart', (e) => e.stopPropagation());
 
         // Grid 2 columnas
         const grid = L.DomUtil.create('div', 'pencil-grid', configPanel);
@@ -162,6 +171,12 @@ function createBtn(icon, cls, title, container, onClick, withPreview = false) {
 
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
+}
+
+function guardBtn(el) {
+    // No dejar que el touch llegue al mapa y activar ventana anti-fantasma
+    L.DomEvent.on(el, 'pointerdown', (e) => { e.stopPropagation(); swallowNext(200); });
+    L.DomEvent.on(el, 'touchstart', (e) => { e.stopPropagation(); swallowNext(200); });
 }
 
 /* =========================
@@ -291,14 +306,14 @@ function finishOrCancelStroke() {
 function handlePencilClick() {
     // cerrar/cancelar trazo activo y suprimir touch fantasma
     finishOrCancelStroke();
-    swallowNext(180);
+    swallowNext(200);
 
     disableEraser();
     (mode === 'pencil') ? disablePencil() : enablePencil();
 }
 function handleEraserClick() {
     finishOrCancelStroke();
-    swallowNext(180);
+    swallowNext(200);
 
     disablePencil();
     (mode === 'eraser') ? disableEraser() : enableEraser();
@@ -408,7 +423,7 @@ function onUp(ev) {
     L.DomEvent.preventDefault(ev?.originalEvent || ev);
     isDrawing = false;
 
-    pushAll(); // guardado final (ya no es tiny en este punto)
+    pushAll(); // guardado final
     currentRef = null;
     points = [];
 }
