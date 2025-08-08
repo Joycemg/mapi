@@ -202,7 +202,7 @@ function enableEraser() {
     drawnItems.eachLayer(layer => {
         if (layer instanceof L.Polyline && !(layer instanceof L.Polygon)) {
             // Aumentar tolerancia al toque
-            if (!layer.options.interactiveBuffer) layer.options.interactiveBuffer = 20;
+            if (!layer.options.interactiveBuffer) layer.options.interactiveBuffer = 40;
             layer.on('click', onEraseClick);
             layer.on('touchstart', onEraseClick); // para móviles
             layer.on('mouseover', () => layer.setStyle({ opacity: 0.4 }));
@@ -239,4 +239,5 @@ setTimeout(() => drawnItems.removeLayer(e.target), 80);
     // Vibración breve para feedback táctil
     if (navigator.vibrate) navigator.vibrate(30);
 }
+
 
