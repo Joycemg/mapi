@@ -229,7 +229,9 @@ function disableEraser() {
 function onEraseClick(e) {
     e.originalEvent?.preventDefault();
     e.originalEvent?.stopPropagation();
-
+e.target.setStyle({ opacity: 0.2 });
+setTimeout(() => drawnItems.removeLayer(e.target), 80);
+    
     const id = e.target._firebaseId;
     if (id) db.collection('shapes').doc(id).delete();
     drawnItems.removeLayer(e.target);
@@ -237,3 +239,4 @@ function onEraseClick(e) {
     // Vibración breve para feedback táctil
     if (navigator.vibrate) navigator.vibrate(30);
 }
+
