@@ -197,30 +197,43 @@ function enableEraser() {
     map.dragging.disable();
     hidePanel('panel');
     map.getContainer().style.cursor = 'crosshair';
+    map.getContainer().style.touchAction = 'none';
 
     drawnItems.eachLayer(layer => {
         if (layer instanceof L.Polyline && !(layer instanceof L.Polygon)) {
+            // Aumentar tolerancia al toque
+            if (!layer.options.interactiveBuffer) layer.options.interactiveBuffer = 20;
             layer.on('click', onEraseClick);
+            layer.on('touchstart', onEraseClick); // para móviles
             layer.on('mouseover', () => layer.setStyle({ opacity: 0.4 }));
             layer.on('mouseout', () => layer.setStyle({ opacity: 1 }));
         }
     });
 }
+
 function disableEraser() {
     eraserButton.classList.remove('active');
     map.dragging.enable();
     showPanel('panel');
     map.getContainer().style.cursor = '';
+    map.getContainer().style.touchAction = '';
 
     drawnItems.eachLayer(layer => {
         layer.off('click', onEraseClick);
+        layer.off('touchstart', onEraseClick); // limpiar también este
         layer.off('mouseover'); layer.off('mouseout');
         layer.setStyle?.({ opacity: 1 });
     });
 }
+
 function onEraseClick(e) {
+    e.originalEvent?.preventDefault();
+    e.originalEvent?.stopPropagation();
+
     const id = e.target._firebaseId;
     if (id) db.collection('shapes').doc(id).delete();
     drawnItems.removeLayer(e.target);
-}
 
+    // Vibración breve para feedback táctil
+    if (navigator.vibrate) navigator.vibrate(30);
+}
