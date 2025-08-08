@@ -2,71 +2,73 @@
 <html lang="es">
 
 <head>
-      <meta charset="UTF-8" />
-      <title>Mapa Apocalipsis en Tiempo Real</title>
-      <meta name="viewport"
-            content="width=device-width, initial-scale=1" />
+        <meta charset="UTF-8" />
+        <title>Mapa Apocalipsis en Tiempo Real</title>
+        <meta name="viewport"
+              content="width=device-width, initial-scale=1" />
 
-      <!-- Leaflet + plugins -->
-      <link rel="stylesheet"
-            href="https://unpkg.com/leaflet/dist/leaflet.css" />
-      <link rel="stylesheet"
-            href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
-      <link rel="stylesheet"
-            href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
-      <link rel="stylesheet"
-            href="styles.css" />
+        <!-- Leaflet + plugins -->
+        <link rel="stylesheet"
+              href="https://unpkg.com/leaflet/dist/leaflet.css" />
+        <link rel="stylesheet"
+              href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+        <link rel="stylesheet"
+              href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+        <link rel="stylesheet"
+              href="styles.css" />
 
-      <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-      <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
-      <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+        <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+        <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+        <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 
-      <!-- Firebase compat (v9+) -->
-      <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-      <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+        <!-- Firebase compat (v9+) -->
+        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 </head>
 
 <body>
-      <div id="map"></div>
+        <div id="map"></div>
 
-      <!-- Panel inferior -->
-      <div id="panel"
-           class="panel">
-            <div class="panel-body"
-                 id="add-controls">
-                  <input type="text"
-                         id="name"
-                         placeholder="Nombre del personaje" />
-                  <input type="color"
-                         id="color"
-                         value="#ff0000" />
-                  <button id="add-button">Agregar pj</button>
-            </div>
-            <div class="panel-body"
-                 id="character-list"></div>
-      </div>
+        <!-- Panel inferior -->
+        <div id="panel"
+             class="panel">
+                <div class="panel-body"
+                     id="add-controls">
+                        <input type="text"
+                               id="name"
+                               placeholder="Nombre del personaje" />
+                        <input type="color"
+                               id="color"
+                               value="#ff0000" />
+                        <button id="add-button">Agregar pj</button>
+                </div>
+                <div class="panel-body"
+                     id="character-list"></div>
+        </div>
 
-      <!-- Config Firebase -->
-      <script type="module"
-              src="./config/firebase.js"></script>
+        <!-- Config Firebase -->
+        <script type="module"
+                src="./config/firebase.js"></script>
 
-      <!-- Módulos (orden recomendado) -->
-      <script type="module"
-              src="./modules/Map.js"></script>
-      <script type="module"
-              src="./modules/panel.js"></script>
-      <script type="module"
-              src="./modules/panelToggle.js"></script>
-      <script type="module"
-              src="./modules/geocoder.js"></script>
-      <script type="module"
-              src="./modules/Draw.js"></script>
-      <script type="module"
-              src="./modules/pencil.js"></script>
-      <script type="module"
-              src="./modules/characters.js"></script>
-      <script type="module"
-              src="./modules/coords.js"></script>
+        <!-- Módulos (orden recomendado) -->
+        <script type="module"
+                src="./modules/Map.js"></script>
+        <script type="module"
+                src="./modules/panel.js"></script>
+        <script type="module"
+                src="./modules/panelToggle.js"></script>
+        <script type="module"
+                src="./modules/geocoder.js"></script>
+        <script type="module"
+                src="./modules/Draw.js"></script>
+        <script type="module"
+                src="./modules/pencil.js"></script>
+        <script type="module"
+                src="./modules/characters.js"></script>
+        <script type="module"
+                src="./modules/coords.js"></script>
+        <script type="module"
+                src="./modules/notes.js"></script>
 </body>
 
 </html>
