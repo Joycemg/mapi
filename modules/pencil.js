@@ -191,53 +191,102 @@ function maybePush() {
         .catch(() => currentRef.set({ points: geoPointArray(), updatedAt: now }, { merge: true }));
 }
 
-/* ======= GOMA ======= */
-function enableEraser() {
-    eraserButton.classList.add('active');
-    map.dragging.disable();
-    hidePanel('panel');
-    map.getContainer().style.cursor = 'crosshair';
-    map.getContainer().style.touchAction = 'none';
+/* ======= GOMA (touch-friendly) ======= */
+const ERASE_TOLERANCE_PX = 22; // ancho de “acierto” alrededor del dedo
+let erasing = false;
 
-    drawnItems.eachLayer(layer => {
-        if (layer instanceof L.Polyline && !(layer instanceof L.Polygon)) {
-            // Aumentar tolerancia al toque
-            if (!layer.options.interactiveBuffer) layer.options.interactiveBuffer = 40;
-            layer.on('click', onEraseClick);
-            layer.on('touchstart', onEraseClick); // para móviles
-            layer.on('mouseover', () => layer.setStyle({ opacity: 0.4 }));
-            layer.on('mouseout', () => layer.setStyle({ opacity: 1 }));
-        }
-    });
+function enableEraser() {
+  eraserButton.classList.add('active');
+  map.dragging.disable();
+  hidePanel('panel');
+  const c = map.getContainer();
+  c.style.cursor = 'crosshair';
+  c.style.touchAction = 'none';
+
+  // Usamos pointer/mouse/touch sobre el MAPA, no sobre la polyline
+  map.on('pointerdown', onErasePointer, { passive: false });
+  map.on('click', onErasePointer, { passive: false }); // por si algún navegador no emite pointer
+  map.on('touchstart', onErasePointer, { passive: false });
 }
 
 function disableEraser() {
-    eraserButton.classList.remove('active');
-    map.dragging.enable();
-    showPanel('panel');
-    map.getContainer().style.cursor = '';
-    map.getContainer().style.touchAction = '';
+  eraserButton.classList.remove('active');
+  map.dragging.enable();
+  showPanel('panel');
+  const c = map.getContainer();
+  c.style.cursor = '';
+  c.style.touchAction = '';
 
-    drawnItems.eachLayer(layer => {
-        layer.off('click', onEraseClick);
-        layer.off('touchstart', onEraseClick); // limpiar también este
-        layer.off('mouseover'); layer.off('mouseout');
-        layer.setStyle?.({ opacity: 1 });
-    });
+  map.off('pointerdown', onErasePointer);
+  map.off('click', onErasePointer);
+  map.off('touchstart', onErasePointer);
+  erasing = false;
 }
 
-function onEraseClick(e) {
-    e.originalEvent?.preventDefault();
-    e.originalEvent?.stopPropagation();
-e.target.setStyle({ opacity: 0.2 });
-setTimeout(() => drawnItems.removeLayer(e.target), 80);
-    
-    const id = e.target._firebaseId;
-    if (id) db.collection('shapes').doc(id).delete();
-    drawnItems.removeLayer(e.target);
+// Borra la polyline más cercana al punto táctil si está dentro de la tolerancia
+function onErasePointer(e) {
+  e.originalEvent?.preventDefault?.();
+  e.originalEvent?.stopPropagation?.();
 
-    // Vibración breve para feedback táctil
-    if (navigator.vibrate) navigator.vibrate(30);
+  if (erasing) return; // evita dobles disparos (click + pointer)
+  erasing = true;
+  setTimeout(() => (erasing = false), 60);
+
+  const latlng = e.latlng || map.mouseEventToLatLng(e.originalEvent);
+  if (!latlng) return;
+
+  const targetLayer = findClosestPolyline(latlng, ERASE_TOLERANCE_PX);
+  if (!targetLayer) return;
+
+  // feedback visual y háptico
+  targetLayer.setStyle?.({ opacity: 0.25 });
+  if (navigator.vibrate) navigator.vibrate(25);
+
+  // eliminar de Firebase y del mapa
+  const id = targetLayer._firebaseId;
+  if (id) db.collection('shapes').doc(id).delete();
+  drawnItems.removeLayer(targetLayer);
 }
 
+// Busca la polyline más cercana a 'latlng' dentro de 'tolPx' píxeles
+function findClosestPolyline(latlng, tolPx) {
+  const p = map.latLngToLayerPoint(latlng);
+  let best = null;
+  let bestDist = Infinity;
 
+  drawnItems.eachLayer(layer => {
+    if (!(layer instanceof L.Polyline) || (layer instanceof L.Polygon)) return;
+
+    const latlngs = layer.getLatLngs();
+    // Puede venir anidado si es MultiPolyline: aplanamos
+    const flat = Array.isArray(latlngs[0]) ? latlngs.flat() : latlngs;
+    if (flat.length < 2) return;
+
+    // recorremos segmentos
+    for (let i = 0; i < flat.length - 1; i++) {
+      const a = map.latLngToLayerPoint(flat[i]);
+      const b = map.latLngToLayerPoint(flat[i + 1]);
+      const d = distPointToSegment(p, a, b);
+      if (d < bestDist) {
+        bestDist = d;
+        best = layer;
+      }
+    }
+  });
+
+  return bestDist <= tolPx ? best : null;
+}
+
+// Distancia (en px) de un punto P a un segmento AB (todo en coordenadas de capa)
+function distPointToSegment(P, A, B) {
+  const vx = B.x - A.x, vy = B.y - A.y;
+  const wx = P.x - A.x, wy = P.y - A.y;
+  const c1 = vx * wx + vy * wy;
+  if (c1 <= 0) return Math.hypot(P.x - A.x, P.y - A.y);
+  const c2 = vx * vx + vy * vy;
+  if (c2 <= c1) return Math.hypot(P.x - B.x, P.y - B.y);
+  const t = c1 / c2;
+  const projX = A.x + t * vx;
+  const projY = A.y + t * vy;
+  return Math.hypot(P.x - projX, P.y - projY);
+}
