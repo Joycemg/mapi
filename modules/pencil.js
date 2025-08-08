@@ -24,14 +24,13 @@ let configPanel = null;
 
 /* ===== Anti-fantasma ===== */
 let suppressUntil = 0;
-function swallowNext(ms = 200) { suppressUntil = Date.now() + ms; }
+function swallowNext(ms = 220) { suppressUntil = Date.now() + ms; }
 
 /* =========================
    Helpers UI
 ========================= */
 const setStyles = (el, styles) => Object.assign(el.style, styles);
 
-// versión compacta
 const chipBase = {
     display: 'flex',
     alignItems: 'center',
@@ -69,13 +68,12 @@ const makeChip = (parent) => {
             b.click();
         }
     });
-    // 🔒 no dejar que el touch llegue al mapa (pero sin cancelar el click)
     L.DomEvent.on(b, 'pointerdown', (e) => e.stopPropagation());
     L.DomEvent.on(b, 'touchstart', (e) => e.stopPropagation());
     return b;
 };
 
-/* ===== Helpers de puntero/UI ===== */
+/* ===== Helpers puntero/UI ===== */
 function getClientXY(ev) {
     const oe = ev.originalEvent;
     if (!oe) return null;
@@ -102,23 +100,22 @@ const PencilControl = L.Control.extend({
         L.DomEvent.disableScrollPropagation(wrapper);
         setStyles(wrapper, { position: 'relative', overflow: 'visible' });
 
-        // 🔒 Bloqueo suave: evita que el mapa reciba el evento, pero deja vivir el click
+        // Evitar que el mapa reciba el pointer/touch desde la UI
         L.DomEvent.on(wrapper, 'pointerdown', (e) => e.stopPropagation());
         L.DomEvent.on(wrapper, 'touchstart', (e) => e.stopPropagation());
 
-        // 🧯 Si el dedo entra al wrapper mientras dibujo, cierro/cancelo y protejo el próximo toque
+        // Si el dedo entra al wrapper mientras dibujo, cerrar/cancelar trazo
         L.DomEvent.on(wrapper, 'pointerenter', () => {
-            if (isDrawing) { finishOrCancelStroke(); swallowNext(220); }
+            if (isDrawing) { finishOrCancelStroke(); swallowNext(240); }
         });
 
         pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick, true);
         eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick, false);
 
-        // Guard suave en los botones (anti-fantasma)
         guardBtn(pencilButton);
         guardBtn(eraserButton);
 
-        // Panel dropdown (compacto)
+        // Panel
         configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
         setStyles(configPanel, {
             position: 'absolute',
@@ -138,7 +135,7 @@ const PencilControl = L.Control.extend({
         L.DomEvent.on(configPanel, 'pointerdown', (e) => e.stopPropagation());
         L.DomEvent.on(configPanel, 'touchstart', (e) => e.stopPropagation());
 
-        // Grid 2 columnas
+        // Grid
         const grid = L.DomUtil.create('div', 'pencil-grid', configPanel);
         setStyles(grid, {
             display: 'grid',
@@ -183,25 +180,21 @@ function createBtn(icon, cls, title, container, onClick, withPreview = false) {
     a.setAttribute('aria-label', title);
 
     a.innerHTML = `<span class="icon" style="display:block;line-height:16px;text-align:center;">${icon}</span>`;
-
-    // Solo previsualizador para el lápiz
     if (withPreview) {
         a.innerHTML += `<div class="stroke-preview" 
         style="width:20px;height:0;border-top:4px solid black;margin:4px auto 2px;border-radius:2px;"></div>`;
     }
-
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
 }
 
 function guardBtn(el) {
-    // No dejar que el touch llegue al mapa y activar ventana anti-fantasma
-    L.DomEvent.on(el, 'pointerdown', (e) => { e.stopPropagation(); swallowNext(220); });
-    L.DomEvent.on(el, 'touchstart', (e) => { e.stopPropagation(); swallowNext(220); });
+    L.DomEvent.on(el, 'pointerdown', (e) => { e.stopPropagation(); swallowNext(260); });
+    L.DomEvent.on(el, 'touchstart', (e) => { e.stopPropagation(); swallowNext(260); });
 }
 
 /* =========================
-   Selectores (sin texto en opciones)
+   Selectores
 ========================= */
 function makeColorSelector() {
     const s = L.DomUtil.create('div', 'color-selector');
@@ -311,7 +304,6 @@ function onEscClose(e) {
 ========================= */
 function finishOrCancelStroke() {
     if (!isDrawing) return;
-    // Si el trazo es mínimo, cancelar (no guardar)
     if (points.length < 2) {
         if (currentLine) drawnItems.removeLayer(currentLine);
         if (currentRef) db.collection('shapes').doc(currentRef.id).delete().catch(() => { });
@@ -325,16 +317,15 @@ function finishOrCancelStroke() {
 }
 
 function handlePencilClick() {
-    // cerrar/cancelar trazo activo y suprimir touch fantasma
     finishOrCancelStroke();
-    swallowNext(220);
+    swallowNext(260);
 
     disableEraser();
     (mode === 'pencil') ? disablePencil() : enablePencil();
 }
 function handleEraserClick() {
     finishOrCancelStroke();
-    swallowNext(220);
+    swallowNext(260);
 
     disablePencil();
     (mode === 'eraser') ? disableEraser() : enableEraser();
@@ -365,6 +356,13 @@ function enablePencil() {
     map.on('touchstart', onDown);
     map.on('touchmove', onMove);
     map.on('touchend', onUp);
+
+    // 🔐 Redes de seguridad adicionales:
+    // 1) si el puntero sale del mapa, terminar/cancelar
+    L.DomEvent.on(map.getContainer(), 'pointerleave', onMapPointerLeave);
+    // 2) escucha global en captura: si el dedo cae sobre UI, cortar
+    document.addEventListener('pointermove', onGlobalPointerMove, true);
+    document.addEventListener('pointerup', onGlobalPointerUp, true);
 }
 function disablePencil() {
     if (mode === 'pencil') mode = 'idle';
@@ -382,7 +380,36 @@ function disablePencil() {
     map.off('touchmove', onMove);
     map.off('touchend', onUp);
 
+    // quitar redes de seguridad
+    L.DomEvent.off(map.getContainer(), 'pointerleave', onMapPointerLeave);
+    document.removeEventListener('pointermove', onGlobalPointerMove, true);
+    document.removeEventListener('pointerup', onGlobalPointerUp, true);
+
     isDrawing = false; currentLine = null; currentRef = null; points = [];
+}
+
+function onMapPointerLeave() {
+    if (!isDrawing) return;
+    finishOrCancelStroke();
+    swallowNext(280);
+}
+
+function onGlobalPointerMove(e) {
+    if (!isDrawing) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (el && el.closest('.leaflet-control, .leaflet-bar, .pencil-wrapper')) {
+        finishOrCancelStroke();
+        swallowNext(280);
+    }
+}
+function onGlobalPointerUp() {
+    // si se suelta fuera del mapa, cerrar limpio
+    if (isDrawing) {
+        pushAll();
+        isDrawing = false;
+        currentRef = null;
+        points = [];
+    }
 }
 
 function goodStart(ev) {
@@ -390,18 +417,16 @@ function goodStart(ev) {
     if (!t) return true;
     if (t.closest?.('.leaflet-marker-icon')) return false;
     if (t.closest?.('.leaflet-popup')) return false;
-    // 🔒 bloquea cualquier control Leaflet y tu wrapper
     if (t.closest?.('.leaflet-control, .leaflet-bar, .pencil-wrapper')) return false;
     return true;
 }
 
 function onDown(ev) {
     if (mode !== 'pencil') return;
-    // ⛔ ventana anti-fantasma
     if (Date.now() < suppressUntil) return;
     if (ev.originalEvent?.button !== undefined && ev.originalEvent.button !== 0) return;
     if (!goodStart(ev)) return;
-    if (isOverUI(ev)) return; // no arranques si el puntero ya está sobre UI
+    if (isOverUI(ev)) return;
 
     L.DomEvent.preventDefault(ev.originalEvent || ev);
     L.DomEvent.stopPropagation(ev.originalEvent || ev);
@@ -410,7 +435,6 @@ function onDown(ev) {
     const start = ev.latlng || map.mouseEventToLatLng(ev.originalEvent);
     points = [start];
 
-    // crea doc en Firestore
     const id = `pencil-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     currentRef = db.collection('shapes').doc(id);
 
@@ -418,7 +442,6 @@ function onDown(ev) {
     const geoPoints = [new firebase.firestore.GeoPoint(start.lat, start.lng)];
     currentRef.set({ type: 'pencil', points: geoPoints, style, updatedAt: Date.now() });
 
-    // línea local
     currentLine = L.polyline(points, style);
     currentLine._firebaseId = id;
     drawnItems.addLayer(currentLine);
@@ -429,10 +452,10 @@ function onMove(ev) {
     if (mode !== 'pencil') return;
     if (!isDrawing || !currentLine) return;
 
-    // ❌ Si el puntero se fue a la UI, terminar/cancelar y evitar recta al botón
+    // si el puntero entra en UI, cortar ya
     if (isOverUI(ev)) {
         finishOrCancelStroke();
-        swallowNext(220);
+        swallowNext(260);
         return;
     }
 
@@ -452,7 +475,7 @@ function onUp(ev) {
     L.DomEvent.preventDefault(ev?.originalEvent || ev);
     isDrawing = false;
 
-    pushAll(); // guardado final
+    pushAll();
     currentRef = null;
     points = [];
 }
@@ -484,7 +507,6 @@ function enableEraser() {
     mode = 'eraser';
     eraserButton.classList.add('active');
 
-    // Ocultar botón del lápiz mientras se usa la goma
     if (pencilButton) pencilButton.style.display = 'none';
 
     map.dragging.disable();
@@ -494,13 +516,11 @@ function enableEraser() {
     c.style.cursor = 'crosshair';
     c.style.touchAction = 'none';
 
-    // Pointer Events
     map.on('pointerdown', onEraseDown);
     map.on('pointermove', onEraseMove);
     map.on('pointerup', onEraseUp);
     map.on('pointercancel', onEraseUp);
 
-    // Fallback mouse clásico
     map.on('mousedown', onEraseMouseDown);
     map.on('mousemove', onEraseMouseMove);
     L.DomEvent.on(document, 'mouseup', onEraseMouseUp);
@@ -517,7 +537,6 @@ function disableEraser() {
     if (mode === 'eraser') mode = 'idle';
     eraserButton.classList.remove('active');
 
-    // Mostrar de nuevo el botón del lápiz
     if (pencilButton) pencilButton.style.display = '';
 
     map.dragging.enable();
