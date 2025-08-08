@@ -79,8 +79,9 @@ const PencilControl = L.Control.extend({
         L.DomEvent.disableScrollPropagation(wrapper);
         setStyles(wrapper, { position: 'relative', overflow: 'visible' });
 
-        pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick);
-        eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick);
+        pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick, true);
+        eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick, false);
+
 
         // Panel dropdown (más angosto y con menos padding)
         configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
@@ -138,19 +139,29 @@ const PencilControl = L.Control.extend({
 
 map.addControl(new PencilControl());
 
-function createBtn(icon, cls, title, container, onClick) {
+function createBtn(icon, cls, title, container, onClick, withPreview = false) {
     const a = L.DomUtil.create('a', cls, container);
     a.href = '#';
     a.title = title;
     a.setAttribute('role', 'button');
     a.setAttribute('aria-label', title);
-    a.innerHTML = `
-    <span class="icon" style="display:block;line-height:16px;text-align:center;">${icon}</span>
-    <div class="stroke-preview" style="width:20px;height:0;border-top:4px solid black;margin:4px auto 2px;border-radius:2px;"></div>
-  `;
+
+    a.innerHTML = `<span class="icon" style="display:block;line-height:16px;text-align:center;">${icon}</span>`;
+
+    // Solo agregar previsualizador si withPreview es true
+    if (withPreview) {
+        a.innerHTML += `<div class="stroke-preview" 
+        style="width:20px;height:0;
+        border-top:4px solid black;
+        margin:4px auto 2px;
+        border-radius:2px;">
+      </div>`;
+    }
+
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
 }
+
 
 /* =========================
    Selectores (sin texto en opciones)
@@ -274,6 +285,13 @@ function handlePencilClick() {
 function handleEraserClick() {
     disablePencil();
     (mode === 'eraser') ? disableEraser() : enableEraser();
+}
+
+// Export util para apagar cualquier herramienta activa desde otros módulos
+export function deactivateDrawingTools() {
+    // Desactiva ambos por si alguno está activo
+    disablePencil();
+    disableEraser();
 }
 
 /* =========================
@@ -402,6 +420,10 @@ let lastEraseTs = 0;
 function enableEraser() {
     mode = 'eraser';
     eraserButton.classList.add('active');
+
+    // 🔹 Ocultar botón del lápiz mientras se usa la goma
+    if (pencilButton) pencilButton.style.display = 'none';
+
     map.dragging.disable();
     hidePanel('panel');
 
@@ -427,9 +449,14 @@ function enableEraser() {
 
     toggleUI(false);
 }
+
 function disableEraser() {
     if (mode === 'eraser') mode = 'idle';
     eraserButton.classList.remove('active');
+
+    // 🔹 Mostrar de nuevo el botón del lápiz
+    if (pencilButton) pencilButton.style.display = '';
+
     map.dragging.enable();
     showPanel('panel');
 
@@ -449,6 +476,7 @@ function disableEraser() {
     erasingDrag = false;
     lastEraseTs = 0;
 }
+
 
 /* ----- Pointer Events ----- */
 function onEraseDown(e) {
