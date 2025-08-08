@@ -79,39 +79,47 @@ if ('ontouchstart' in window) {
     map.doubleClickZoom?.disable();
 }
 
-let lastTouchTime = 0;
-let lastTouchPos = null;
+let lastTapTime = 0;
+let lastTapPos = null;
+let touchStartTime = 0;
 
-map.getContainer().addEventListener('touchend', async (ev) => {
-    // Solo un dedo
+const container = map.getContainer();
+
+container.addEventListener('touchstart', (ev) => {
+    if (ev.touches.length === 1) {
+        touchStartTime = Date.now();
+    }
+}, { passive: true });
+
+container.addEventListener('touchend', async (ev) => {
     if (ev.touches.length > 0 || ev.changedTouches.length !== 1) return;
 
     const now = Date.now();
+    const touchDuration = now - touchStartTime;
+
+    // No permitir long press
+    if (touchDuration > 250) return;
+
     const touch = ev.changedTouches[0];
-
-    // Ignorar toques largos
-    if (touch.duration && touch.duration > 300) return;
-
     const containerPoint = map.mouseEventToContainerPoint(touch);
     const latlng = map.containerPointToLatLng(containerPoint);
 
-    // Comparar con el toque anterior
-    const timeDiff = now - lastTouchTime;
-    const samePlace = lastTouchPos &&
-        Math.abs(containerPoint.x - lastTouchPos.x) < 15 &&
-        Math.abs(containerPoint.y - lastTouchPos.y) < 15;
+    const isNear = lastTapPos &&
+        Math.abs(containerPoint.x - lastTapPos.x) < 20 &&
+        Math.abs(containerPoint.y - lastTapPos.y) < 20;
 
-    if (timeDiff < 300 && samePlace) {
-        // Es un doble tap real
+    const isDoubleTap = now - lastTapTime < 300 && isNear;
+
+    if (isDoubleTap) {
         ev.preventDefault();
         ev.stopPropagation();
         const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
         const copied = await copyToClipboard(text);
         showCoordsPopup(latlng, copied);
-        lastTouchTime = 0;
-        lastTouchPos = null;
+        lastTapTime = 0;
+        lastTapPos = null;
     } else {
-        lastTouchTime = now;
-        lastTouchPos = containerPoint;
+        lastTapTime = now;
+        lastTapPos = containerPoint;
     }
 }, { passive: false });
