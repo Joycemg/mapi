@@ -19,14 +19,21 @@ let eraserButton = null;
 const PencilControl = L.Control.extend({
     options: { position: 'topleft' },
     onAdd() {
-        const wrapper = L.DomUtil.create('div', 'leaflet-bar pencil-wrapper');
-        pencilButton = createBtn('✏️', 'custom-pencil', 'Herramienta lápiz', wrapper, handlePencilClick);
-        eraserButton = createBtn('🧽', 'custom-eraser', 'Goma', wrapper, handleEraserClick);
-        wrapper.append(makeColorSel(wrapper), makeWeightSel(wrapper));
+        const wrapper = L.DomUtil.create('div', 'leaflet-bar pencil-wrapper mobile-friendly');
+        pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick);
+        eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick);
+
+        // Agrupamos configuraciones en un menú desplegable
+        const configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
+        configPanel.append(makeColorSel(), makeWeightSel());
+        configPanel.style.display = 'none';
+
+        wrapper.append(configPanel);
         toggleUI('none');
         return wrapper;
     }
 });
+
 map.addControl(new PencilControl());
 
 function createBtn(icon, cls, title, container, onClick) {
@@ -35,28 +42,49 @@ function createBtn(icon, cls, title, container, onClick) {
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
 }
-function makeColorSel(container) {
-    const s = L.DomUtil.create('div', 'color-selector', container);
+function makeColorSel() {
+    const s = L.DomUtil.create('div', 'color-selector');
     ['black', 'white', 'red'].forEach(c => {
         const btn = L.DomUtil.create('div', `pencil-color ${c}`, s);
-        btn.onclick = () => { selectedColor = c; if (pencilButton) pencilButton.style.backgroundColor = c; };
+        btn.style.width = '24px';
+        btn.style.height = '24px';
+        btn.style.borderRadius = '50%';
+        btn.style.margin = '4px';
+        btn.style.border = '1px solid #999';
+        btn.style.backgroundColor = c;
+        btn.onclick = () => {
+            selectedColor = c;
+            if (pencilButton) pencilButton.style.backgroundColor = c;
+        };
     });
     return s;
 }
-function makeWeightSel(container) {
-    const s = L.DomUtil.create('div', 'weight-selector', container);
-    [{ w: 2, l: 'Fino' }, { w: 4, l: 'Medio' }, { w: 6, l: 'Grueso' }].forEach(({ w, l }) => {
+
+function makeWeightSel() {
+    const s = L.DomUtil.create('div', 'weight-selector');
+    [
+        { w: 2, l: 'Fino' },
+        { w: 4, l: 'Medio' },
+        { w: 6, l: 'Grueso' }
+    ].forEach(({ w, l }) => {
         const btn = L.DomUtil.create('div', 'weight-option', s);
-        btn.innerHTML = `<div style="width:30px;height:0;border-top:${w}px solid black;margin-bottom:2px"></div>${l}`;
-        btn.onclick = () => { selectedWeight = w;[...s.children].forEach(c => c.classList.remove('selected')); btn.classList.add('selected'); };
+        btn.innerHTML = `<div style="width:24px;height:0;border-top:${w}px solid black;margin-bottom:2px"></div><small>${l}</small>`;
+        btn.style.padding = '4px';
+        btn.style.textAlign = 'center';
+        btn.onclick = () => {
+            selectedWeight = w;
+            [...s.children].forEach(c => c.classList.remove('selected'));
+            btn.classList.add('selected');
+        };
     });
     return s;
 }
+
 function toggleUI(d) {
-    const p = pencilButton?.parentElement;
-    p?.querySelector('.color-selector') && (p.querySelector('.color-selector').style.display = d);
-    p?.querySelector('.weight-selector') && (p.querySelector('.weight-selector').style.display = d);
+    const panel = pencilButton?.parentElement?.querySelector('.pencil-config-panel');
+    if (panel) panel.style.display = d;
 }
+
 function handlePencilClick() { disableEraser(); pencilButton.classList.contains('active') ? disablePencil() : enablePencil(); }
 function handleEraserClick() { disablePencil(); eraserButton.classList.contains('active') ? disableEraser() : enableEraser(); }
 
@@ -195,3 +223,4 @@ function onEraseClick(e) {
     if (id) db.collection('shapes').doc(id).delete();
     drawnItems.removeLayer(e.target);
 }
+
