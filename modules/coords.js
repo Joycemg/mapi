@@ -75,19 +75,36 @@ map.on('contextmenu', async (e) => {
     showCoordsPopup(e.latlng, copied);
 });
 
-if ('ontouchstart' in window) { map.doubleClickZoom?.disable(); }
-let lastTouchTs = 0;
-map.getContainer().addEventListener('touchend', async (ev) => {
-    const now = Date.now(); const dt = now - lastTouchTs;
-    const touch = ev.changedTouches && ev.changedTouches[0]; if (!touch) return;
+if ('ontouchstart' in window) {
+    map.doubleClickZoom?.disable();
+}
 
-    if (dt > 0 && dt < 300) {
-        const containerPoint = map.mouseEventToContainerPoint(touch);
-        const latlng = map.containerPointToLatLng(containerPoint);
-        const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
-        let copied = false; try { copied = await copyToClipboard(text); } catch { }
-        showCoordsPopup(latlng, copied);
-        ev.preventDefault(); ev.stopPropagation();
+let lastTap = 0;
+let lastLatLng = null;
+
+map.getContainer().addEventListener('touchend', async (ev) => {
+    if (ev.touches.length > 0 || ev.changedTouches.length !== 1) return;
+
+    const now = Date.now();
+    const touch = ev.changedTouches[0];
+    const containerPoint = map.mouseEventToContainerPoint(touch);
+    const latlng = map.containerPointToLatLng(containerPoint);
+
+    if (now - lastTap < 300) {
+        const moved = lastLatLng &&
+            (Math.abs(latlng.lat - lastLatLng.lat) > 0.0001 || Math.abs(latlng.lng - lastLatLng.lng) > 0.0001);
+
+        if (!moved) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
+            const copied = await copyToClipboard(text);
+            showCoordsPopup(latlng, copied);
+            lastTap = 0;
+            return;
+        }
     }
-    lastTouchTs = now;
+
+    lastTap = now;
+    lastLatLng = latlng;
 }, { passive: false });
