@@ -79,32 +79,39 @@ if ('ontouchstart' in window) {
     map.doubleClickZoom?.disable();
 }
 
-let lastTap = 0;
-let lastLatLng = null;
+let lastTouchTime = 0;
+let lastTouchPos = null;
 
 map.getContainer().addEventListener('touchend', async (ev) => {
+    // Solo un dedo
     if (ev.touches.length > 0 || ev.changedTouches.length !== 1) return;
 
     const now = Date.now();
     const touch = ev.changedTouches[0];
+
+    // Ignorar toques largos
+    if (touch.duration && touch.duration > 300) return;
+
     const containerPoint = map.mouseEventToContainerPoint(touch);
     const latlng = map.containerPointToLatLng(containerPoint);
 
-    if (now - lastTap < 300) {
-        const moved = lastLatLng &&
-            (Math.abs(latlng.lat - lastLatLng.lat) > 0.0001 || Math.abs(latlng.lng - lastLatLng.lng) > 0.0001);
+    // Comparar con el toque anterior
+    const timeDiff = now - lastTouchTime;
+    const samePlace = lastTouchPos &&
+        Math.abs(containerPoint.x - lastTouchPos.x) < 15 &&
+        Math.abs(containerPoint.y - lastTouchPos.y) < 15;
 
-        if (!moved) {
-            ev.preventDefault();
-            ev.stopPropagation();
-            const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
-            const copied = await copyToClipboard(text);
-            showCoordsPopup(latlng, copied);
-            lastTap = 0;
-            return;
-        }
+    if (timeDiff < 300 && samePlace) {
+        // Es un doble tap real
+        ev.preventDefault();
+        ev.stopPropagation();
+        const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
+        const copied = await copyToClipboard(text);
+        showCoordsPopup(latlng, copied);
+        lastTouchTime = 0;
+        lastTouchPos = null;
+    } else {
+        lastTouchTime = now;
+        lastTouchPos = containerPoint;
     }
-
-    lastTap = now;
-    lastLatLng = latlng;
 }, { passive: false });
