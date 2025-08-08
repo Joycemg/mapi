@@ -22,12 +22,16 @@ let pencilButton = null;
 let eraserButton = null;
 let configPanel = null;
 
+/* ===== Anti-fantasma ===== */
+let suppressUntil = 0;
+function swallowNext(ms = 180) { suppressUntil = Date.now() + ms; }
+
 /* =========================
    Helpers UI
 ========================= */
 const setStyles = (el, styles) => Object.assign(el.style, styles);
 
-// 🟢 versión compacta
+// versión compacta
 const chipBase = {
     display: 'flex',
     alignItems: 'center',
@@ -38,7 +42,7 @@ const chipBase = {
     userSelect: 'none',
     border: '1px solid #e5e7eb',
     background: '#fafafa',
-    minHeight: '36px' // más chico que 44px
+    minHeight: '36px'
 };
 
 const markSelected = (btn, group) => {
@@ -79,11 +83,14 @@ const PencilControl = L.Control.extend({
         L.DomEvent.disableScrollPropagation(wrapper);
         setStyles(wrapper, { position: 'relative', overflow: 'visible' });
 
+        // 🛡️ Bloqueo extra de eventos táctiles que se filtran al mapa
+        L.DomEvent.on(wrapper, 'pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); });
+        L.DomEvent.on(wrapper, 'touchstart', (e) => { e.preventDefault(); e.stopPropagation(); });
+
         pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick, true);
         eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick, false);
 
-
-        // Panel dropdown (más angosto y con menos padding)
+        // Panel dropdown (compacto)
         configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
         setStyles(configPanel, {
             position: 'absolute',
@@ -95,18 +102,18 @@ const PencilControl = L.Control.extend({
             borderRadius: '10px',
             boxShadow: '0 8px 20px rgba(0,0,0,.16)',
             zIndex: '2000',
-            minWidth: '200px',   // antes 260px
-            padding: '8px'       // antes 12px
+            minWidth: '200px',
+            padding: '8px'
         });
         L.DomEvent.disableClickPropagation(configPanel);
         L.DomEvent.disableScrollPropagation(configPanel);
 
-        // Grid 2 columnas compacto
+        // Grid 2 columnas
         const grid = L.DomUtil.create('div', 'pencil-grid', configPanel);
         setStyles(grid, {
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
-            gap: '8px 12px',     // menos separación
+            gap: '8px 12px',
             alignItems: 'start'
         });
 
@@ -118,9 +125,8 @@ const PencilControl = L.Control.extend({
         weightWrap.innerHTML = `<div style="font:600 11px/1.1 system-ui, sans-serif;margin:0 0 6px;">Grosor</div>`;
         weightWrap.append(makeWeightSelector());
 
-        // Responsive aún más compacto
         const applyResponsive = () => {
-            const oneCol = window.innerWidth < 360; // era 420
+            const oneCol = window.innerWidth < 360;
             grid.style.gridTemplateColumns = oneCol ? '1fr' : '1fr 1fr';
             configPanel.style.minWidth = oneCol ? '180px' : '200px';
         };
@@ -148,20 +154,15 @@ function createBtn(icon, cls, title, container, onClick, withPreview = false) {
 
     a.innerHTML = `<span class="icon" style="display:block;line-height:16px;text-align:center;">${icon}</span>`;
 
-    // Solo agregar previsualizador si withPreview es true
+    // Solo previsualizador para el lápiz
     if (withPreview) {
         a.innerHTML += `<div class="stroke-preview" 
-        style="width:20px;height:0;
-        border-top:4px solid black;
-        margin:4px auto 2px;
-        border-radius:2px;">
-      </div>`;
+        style="width:20px;height:0;border-top:4px solid black;margin:4px auto 2px;border-radius:2px;"></div>`;
     }
 
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
 }
-
 
 /* =========================
    Selectores (sin texto en opciones)
@@ -170,10 +171,7 @@ function makeColorSelector() {
     const s = L.DomUtil.create('div', 'color-selector');
     setStyles(s, { display: 'flex', flexDirection: 'column', gap: '6px' });
 
-    const colors = [
-        'black', 'white',
-        '#e11d48', '#10b981'
-    ];
+    const colors = ['black', 'white', '#e11d48', '#10b981'];
 
     colors.forEach((name) => {
         const btn = makeChip(s);
@@ -181,7 +179,6 @@ function makeColorSelector() {
         btn.title = `Color ${name}`;
         btn.setAttribute('aria-label', `Color ${name}`);
 
-        // Swatch circular más chico
         const svg = svgEl('svg', { width: 22, height: 22, viewBox: '0 0 22 22', style: 'margin:auto' });
         const circle = svgEl('circle', {
             cx: 11, cy: 11, r: 9,
@@ -190,7 +187,6 @@ function makeColorSelector() {
             'stroke-width': 1
         });
         svg.appendChild(circle);
-
         btn.append(svg);
 
         if (selectedColor === name) markSelected(btn, s);
@@ -220,7 +216,6 @@ function makeWeightSelector() {
         btn.title = `Grosor ${w}px`;
         btn.setAttribute('aria-label', `Grosor ${w}px`);
 
-        // Línea de muestra más corta/compacta
         const svg = svgEl('svg', { width: 60, height: 18, viewBox: '0 0 60 18', style: 'margin:auto' });
         const line = svgEl('line', {
             x1: 6, y1: 9, x2: 54, y2: 9,
@@ -278,18 +273,39 @@ function onEscClose(e) {
 /* =========================
    Botones (modes)
 ========================= */
+function finishOrCancelStroke() {
+    if (!isDrawing) return;
+    // Si el trazo es mínimo, cancelar (no guardar)
+    if (points.length < 2) {
+        if (currentLine) drawnItems.removeLayer(currentLine);
+        if (currentRef) db.collection('shapes').doc(currentRef.id).delete().catch(() => { });
+    } else {
+        pushAll();
+    }
+    isDrawing = false;
+    currentLine = null;
+    currentRef = null;
+    points = [];
+}
+
 function handlePencilClick() {
+    // cerrar/cancelar trazo activo y suprimir touch fantasma
+    finishOrCancelStroke();
+    swallowNext(180);
+
     disableEraser();
     (mode === 'pencil') ? disablePencil() : enablePencil();
 }
 function handleEraserClick() {
+    finishOrCancelStroke();
+    swallowNext(180);
+
     disablePencil();
     (mode === 'eraser') ? disableEraser() : enableEraser();
 }
 
 // Export util para apagar cualquier herramienta activa desde otros módulos
 export function deactivateDrawingTools() {
-    // Desactiva ambos por si alguno está activo
     disablePencil();
     disableEraser();
 }
@@ -338,12 +354,15 @@ function goodStart(ev) {
     if (!t) return true;
     if (t.closest?.('.leaflet-marker-icon')) return false;
     if (t.closest?.('.leaflet-popup')) return false;
-    if (t.closest?.('.leaflet-control')) return false;
+    // 🔒 bloquea cualquier control Leaflet y tu wrapper
+    if (t.closest?.('.leaflet-control, .leaflet-bar, .pencil-wrapper')) return false;
     return true;
 }
 
 function onDown(ev) {
     if (mode !== 'pencil') return;
+    // ⛔ ventana anti-fantasma
+    if (Date.now() < suppressUntil) return;
     if (ev.originalEvent?.button !== undefined && ev.originalEvent.button !== 0) return;
     if (!goodStart(ev)) return;
 
@@ -389,7 +408,7 @@ function onUp(ev) {
     L.DomEvent.preventDefault(ev?.originalEvent || ev);
     isDrawing = false;
 
-    pushAll(); // guardado final
+    pushAll(); // guardado final (ya no es tiny en este punto)
     currentRef = null;
     points = [];
 }
@@ -421,7 +440,7 @@ function enableEraser() {
     mode = 'eraser';
     eraserButton.classList.add('active');
 
-    // 🔹 Ocultar botón del lápiz mientras se usa la goma
+    // Ocultar botón del lápiz mientras se usa la goma
     if (pencilButton) pencilButton.style.display = 'none';
 
     map.dragging.disable();
@@ -454,7 +473,7 @@ function disableEraser() {
     if (mode === 'eraser') mode = 'idle';
     eraserButton.classList.remove('active');
 
-    // 🔹 Mostrar de nuevo el botón del lápiz
+    // Mostrar de nuevo el botón del lápiz
     if (pencilButton) pencilButton.style.display = '';
 
     map.dragging.enable();
@@ -476,7 +495,6 @@ function disableEraser() {
     erasingDrag = false;
     lastEraseTs = 0;
 }
-
 
 /* ----- Pointer Events ----- */
 function onEraseDown(e) {
@@ -528,7 +546,7 @@ function onEraseMouseUp(e) {
 /* ----- Utilidades de goma ----- */
 function eraseShouldStart(e) {
     const src = e.originalEvent?.target;
-    if (src && (src.closest('.leaflet-control') || src.closest('.pencil-wrapper'))) return false;
+    if (src && (src.closest('.leaflet-control') || src.closest('.leaflet-bar') || src.closest('.pencil-wrapper'))) return false;
     if (e.isPrimary === false) return false;
     if (e.button !== undefined && e.button !== 0) return false;
     return true;
