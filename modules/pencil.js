@@ -4,67 +4,287 @@ import { drawnItems } from './Draw.js';
 import { db } from '../config/firebase.js';
 import { hidePanel, showPanel } from './panel.js';
 
+/* =========================
+   Estado / Config
+========================= */
+let mode = 'idle'; // 'idle' | 'pencil' | 'eraser'
 let isDrawing = false;
 let currentLine = null;
-let currentRef = null;
-let points = []; // L.LatLng[]
+let currentRef = null;           // doc ref Firestore del trazo en curso
+let points = [];                 // L.LatLng[]
 let lastUpdate = 0;
 const UPDATE_EVERY_MS = 100;
 
 let selectedColor = 'black';
-let selectedWeight = 2;
+let selectedWeight = 4;          // default medio
+
 let pencilButton = null;
 let eraserButton = null;
+let configPanel = null;
 
+/* =========================
+   Helpers UI
+========================= */
+const setStyles = (el, styles) => Object.assign(el.style, styles);
+
+// 🟢 versión compacta
+const chipBase = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '6px 8px',
+    cursor: 'pointer',
+    borderRadius: '8px',
+    userSelect: 'none',
+    border: '1px solid #e5e7eb',
+    background: '#fafafa',
+    minHeight: '36px' // más chico que 44px
+};
+
+const markSelected = (btn, group) => {
+    [...group.children].forEach(c => {
+        c.classList.remove('selected');
+        c.style.background = '#fafafa';
+        c.style.borderColor = '#e5e7eb';
+        c.style.boxShadow = 'none';
+    });
+    btn.classList.add('selected');
+    btn.style.background = '#eef4ff';
+    btn.style.borderColor = '#bdd0ff';
+    btn.style.boxShadow = '0 0 0 1px #bdd0ff inset';
+};
+
+const makeChip = (parent) => {
+    const b = L.DomUtil.create('button', 'chip', parent);
+    b.type = 'button';
+    setStyles(b, chipBase);
+    b.tabIndex = 0;
+    b.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            b.click();
+        }
+    });
+    return b;
+};
+
+/* =========================
+   UI del control
+========================= */
 const PencilControl = L.Control.extend({
     options: { position: 'topleft' },
     onAdd() {
-        const wrapper = L.DomUtil.create('div', 'leaflet-bar pencil-wrapper');
-        pencilButton = createBtn('✏️', 'custom-pencil', 'Herramienta lápiz', wrapper, handlePencilClick);
-        eraserButton = createBtn('🧽', 'custom-eraser', 'Goma', wrapper, handleEraserClick);
-        wrapper.append(makeColorSel(wrapper), makeWeightSel(wrapper));
-        toggleUI('none');
+        const wrapper = L.DomUtil.create('div', 'leaflet-bar pencil-wrapper mobile-friendly');
+        L.DomEvent.disableClickPropagation(wrapper);
+        L.DomEvent.disableScrollPropagation(wrapper);
+        setStyles(wrapper, { position: 'relative', overflow: 'visible' });
+
+        pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick);
+        eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick);
+
+        // Panel dropdown (más angosto y con menos padding)
+        configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
+        setStyles(configPanel, {
+            position: 'absolute',
+            top: '100%',
+            left: '0',
+            display: 'none',
+            background: '#fff',
+            border: '1px solid #d1d5db',
+            borderRadius: '10px',
+            boxShadow: '0 8px 20px rgba(0,0,0,.16)',
+            zIndex: '2000',
+            minWidth: '200px',   // antes 260px
+            padding: '8px'       // antes 12px
+        });
+        L.DomEvent.disableClickPropagation(configPanel);
+        L.DomEvent.disableScrollPropagation(configPanel);
+
+        // Grid 2 columnas compacto
+        const grid = L.DomUtil.create('div', 'pencil-grid', configPanel);
+        setStyles(grid, {
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '8px 12px',     // menos separación
+            alignItems: 'start'
+        });
+
+        const colorWrap = L.DomUtil.create('div', 'pencil-section-colors', grid);
+        colorWrap.innerHTML = `<div style="font:600 11px/1.1 system-ui, sans-serif;margin:0 0 6px;">Color</div>`;
+        colorWrap.append(makeColorSelector());
+
+        const weightWrap = L.DomUtil.create('div', 'pencil-section-weights', grid);
+        weightWrap.innerHTML = `<div style="font:600 11px/1.1 system-ui, sans-serif;margin:0 0 6px;">Grosor</div>`;
+        weightWrap.append(makeWeightSelector());
+
+        // Responsive aún más compacto
+        const applyResponsive = () => {
+            const oneCol = window.innerWidth < 360; // era 420
+            grid.style.gridTemplateColumns = oneCol ? '1fr' : '1fr 1fr';
+            configPanel.style.minWidth = oneCol ? '180px' : '200px';
+        };
+        applyResponsive();
+        window.addEventListener('resize', applyResponsive);
+
+        // Cierre
+        document.addEventListener('click', onDocClickClose, true);
+        document.addEventListener('keydown', onEscClose, true);
+
+        toggleUI(false);
+        updatePencilPreview();
         return wrapper;
     }
 });
+
 map.addControl(new PencilControl());
 
 function createBtn(icon, cls, title, container, onClick) {
     const a = L.DomUtil.create('a', cls, container);
-    a.innerHTML = icon; a.href = '#'; a.title = title;
+    a.href = '#';
+    a.title = title;
+    a.setAttribute('role', 'button');
+    a.setAttribute('aria-label', title);
+    a.innerHTML = `
+    <span class="icon" style="display:block;line-height:16px;text-align:center;">${icon}</span>
+    <div class="stroke-preview" style="width:20px;height:0;border-top:4px solid black;margin:4px auto 2px;border-radius:2px;"></div>
+  `;
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
 }
-function makeColorSel(container) {
-    const s = L.DomUtil.create('div', 'color-selector', container);
-    ['black', 'white', 'red'].forEach(c => {
-        const btn = L.DomUtil.create('div', `pencil-color ${c}`, s);
-        btn.onclick = () => { selectedColor = c; if (pencilButton) pencilButton.style.backgroundColor = c; };
-    });
-    return s;
-}
-function makeWeightSel(container) {
-    const s = L.DomUtil.create('div', 'weight-selector', container);
-    [{ w: 2, l: 'Fino' }, { w: 4, l: 'Medio' }, { w: 6, l: 'Grueso' }].forEach(({ w, l }) => {
-        const btn = L.DomUtil.create('div', 'weight-option', s);
-        btn.innerHTML = `<div style="width:30px;height:0;border-top:${w}px solid black;margin-bottom:2px"></div>${l}`;
-        btn.onclick = () => { selectedWeight = w;[...s.children].forEach(c => c.classList.remove('selected')); btn.classList.add('selected'); };
-    });
-    return s;
-}
-function toggleUI(d) {
-    const p = pencilButton?.parentElement;
-    p?.querySelector('.color-selector') && (p.querySelector('.color-selector').style.display = d);
-    p?.querySelector('.weight-selector') && (p.querySelector('.weight-selector').style.display = d);
-}
-function handlePencilClick() { disableEraser(); pencilButton.classList.contains('active') ? disablePencil() : enablePencil(); }
-function handleEraserClick() { disablePencil(); eraserButton.classList.contains('active') ? disableEraser() : enableEraser(); }
 
-/* ======= LÁPIZ (eventos Leaflet) ======= */
+/* =========================
+   Selectores (sin texto en opciones)
+========================= */
+function makeColorSelector() {
+    const s = L.DomUtil.create('div', 'color-selector');
+    setStyles(s, { display: 'flex', flexDirection: 'column', gap: '6px' });
+
+    const colors = [
+        'black', 'white',
+        '#e11d48', '#10b981'
+    ];
+
+    colors.forEach((name) => {
+        const btn = makeChip(s);
+        btn.className = `chip color-chip`;
+        btn.title = `Color ${name}`;
+        btn.setAttribute('aria-label', `Color ${name}`);
+
+        // Swatch circular más chico
+        const svg = svgEl('svg', { width: 22, height: 22, viewBox: '0 0 22 22', style: 'margin:auto' });
+        const circle = svgEl('circle', {
+            cx: 11, cy: 11, r: 9,
+            fill: name,
+            stroke: (name === 'white' ? '#9ca3af' : 'none'),
+            'stroke-width': 1
+        });
+        svg.appendChild(circle);
+
+        btn.append(svg);
+
+        if (selectedColor === name) markSelected(btn, s);
+
+        btn.onclick = () => {
+            selectedColor = name;
+            markSelected(btn, s);
+            updatePencilPreview();
+            s.parentElement?.parentElement
+                ?.querySelectorAll('.weight-chip svg line')
+                .forEach(line => line.setAttribute('stroke', selectedColor));
+        };
+    });
+
+    return s;
+}
+
+function makeWeightSelector() {
+    const s = L.DomUtil.create('div', 'weight-selector');
+    setStyles(s, { display: 'flex', flexDirection: 'column', gap: '6px' });
+
+    const options = [2, 4, 6, 10];
+
+    options.forEach((w) => {
+        const btn = makeChip(s);
+        btn.className = 'chip weight-chip';
+        btn.title = `Grosor ${w}px`;
+        btn.setAttribute('aria-label', `Grosor ${w}px`);
+
+        // Línea de muestra más corta/compacta
+        const svg = svgEl('svg', { width: 60, height: 18, viewBox: '0 0 60 18', style: 'margin:auto' });
+        const line = svgEl('line', {
+            x1: 6, y1: 9, x2: 54, y2: 9,
+            stroke: selectedColor,
+            'stroke-width': String(w),
+            'stroke-linecap': 'round'
+        });
+        svg.appendChild(line);
+        btn.append(svg);
+
+        if (selectedWeight === w) markSelected(btn, s);
+
+        btn.onclick = () => {
+            selectedWeight = w;
+            markSelected(btn, s);
+            updatePencilPreview();
+        };
+    });
+
+    return s;
+}
+
+function svgEl(tag, attrs) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, String(v)));
+    return el;
+}
+
+function updatePencilPreview() {
+    if (pencilButton) {
+        const preview = pencilButton.querySelector('.stroke-preview');
+        if (preview) preview.style.borderTop = `${selectedWeight}px solid ${selectedColor}`;
+        pencilButton.style.boxShadow = (selectedColor === 'white')
+            ? 'inset 0 0 0 2px rgba(0,0,0,.25)'
+            : 'inset 0 0 0 2px rgba(0,0,0,.08)';
+    }
+    document.querySelectorAll('.weight-chip svg line').forEach(line => {
+        line.setAttribute('stroke', selectedColor);
+    });
+}
+
+function toggleUI(show) {
+    if (!configPanel) return;
+    configPanel.style.display = show ? 'block' : 'none';
+}
+function onDocClickClose(e) {
+    if (!configPanel || mode !== 'pencil') return;
+    const target = e.target;
+    if (!target.closest('.pencil-wrapper')) toggleUI(false);
+}
+function onEscClose(e) {
+    if (e.key === 'Escape' && mode === 'pencil') toggleUI(false);
+}
+
+/* =========================
+   Botones (modes)
+========================= */
+function handlePencilClick() {
+    disableEraser();
+    (mode === 'pencil') ? disablePencil() : enablePencil();
+}
+function handleEraserClick() {
+    disablePencil();
+    (mode === 'eraser') ? disableEraser() : enableEraser();
+}
+
+/* =========================
+   LÁPIZ (Leaflet events)
+========================= */
 function enablePencil() {
+    mode = 'pencil';
     pencilButton.classList.add('active');
-    pencilButton.style.backgroundColor = selectedColor;
-    toggleUI('flex');
+    toggleUI(true);
+    updatePencilPreview();
+
     map.dragging.disable();
     hidePanel('panel');
     map.getContainer().style.touchAction = 'none';
@@ -77,9 +297,10 @@ function enablePencil() {
     map.on('touchend', onUp);
 }
 function disablePencil() {
+    if (mode === 'pencil') mode = 'idle';
     pencilButton.classList.remove('active');
-    pencilButton.style.backgroundColor = selectedColor;
-    toggleUI('none');
+    toggleUI(false);
+
     map.dragging.enable();
     showPanel('panel');
     map.getContainer().style.touchAction = '';
@@ -104,8 +325,10 @@ function goodStart(ev) {
 }
 
 function onDown(ev) {
+    if (mode !== 'pencil') return;
     if (ev.originalEvent?.button !== undefined && ev.originalEvent.button !== 0) return;
     if (!goodStart(ev)) return;
+
     L.DomEvent.preventDefault(ev.originalEvent || ev);
     L.DomEvent.stopPropagation(ev.originalEvent || ev);
 
@@ -113,14 +336,15 @@ function onDown(ev) {
     const start = ev.latlng || map.mouseEventToLatLng(ev.originalEvent);
     points = [start];
 
+    // crea doc en Firestore
     const id = `pencil-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     currentRef = db.collection('shapes').doc(id);
 
     const style = { color: selectedColor, weight: selectedWeight };
     const geoPoints = [new firebase.firestore.GeoPoint(start.lat, start.lng)];
-
     currentRef.set({ type: 'pencil', points: geoPoints, style, updatedAt: Date.now() });
 
+    // línea local
     currentLine = L.polyline(points, style);
     currentLine._firebaseId = id;
     drawnItems.addLayer(currentLine);
@@ -128,29 +352,33 @@ function onDown(ev) {
 }
 
 function onMove(ev) {
+    if (mode !== 'pencil') return;
     if (!isDrawing || !currentLine) return;
+
     const ll = ev.latlng || map.mouseEventToLatLng(ev.originalEvent);
     if (!ll) return;
-    L.DomEvent.preventDefault(ev.originalEvent || ev);
 
+    L.DomEvent.preventDefault(ev.originalEvent || ev);
     currentLine.addLatLng(ll);
     points.push(ll);
     maybePush();
 }
 
 function onUp(ev) {
+    if (mode !== 'pencil') return;
     if (!isDrawing) return;
+
     L.DomEvent.preventDefault(ev?.originalEvent || ev);
     isDrawing = false;
 
-    pushAll(); // guardar la geometría final
+    pushAll(); // guardado final
     currentRef = null;
     points = [];
 }
 
-function geoPointArray() {
-    return points.map(ll => new firebase.firestore.GeoPoint(ll.lat, ll.lng));
-}
+const geoPointArray = () =>
+    points.map(ll => new firebase.firestore.GeoPoint(ll.lat, ll.lng));
+
 function pushAll() {
     if (!currentRef) return;
     currentRef.set({ points: geoPointArray(), updatedAt: Date.now() }, { merge: true });
@@ -159,55 +387,136 @@ function maybePush() {
     const now = Date.now();
     if (!currentRef || now - lastUpdate < UPDATE_EVERY_MS) return;
     lastUpdate = now;
-    currentRef.update({ points: geoPointArray(), updatedAt: now })
-        .catch(() => currentRef.set({ points: geoPointArray(), updatedAt: now }, { merge: true }));
+    const payload = { points: geoPointArray(), updatedAt: now };
+    currentRef.update(payload).catch(() => currentRef.set(payload, { merge: true }));
 }
 
-/* ======= GOMA (touch-friendly) ======= */
-const ERASE_TOLERANCE_PX = 22; // ancho de “acierto” alrededor del dedo
-let erasing = false;
+/* =========================
+   GOMA
+========================= */
+const ERASE_TOLERANCE_PX = 22;
+const ERASE_THROTTLE_MS = 40;
+let erasingDrag = false;
+let lastEraseTs = 0;
 
 function enableEraser() {
+    mode = 'eraser';
     eraserButton.classList.add('active');
     map.dragging.disable();
     hidePanel('panel');
+
     const c = map.getContainer();
     c.style.cursor = 'crosshair';
     c.style.touchAction = 'none';
 
-    // Solo pointerdown: evita el doble disparo click+pointer
-    map.on('pointerdown', onErasePointer, { passive: false });
-    // map.on('click', onErasePointer);        // <- QUITADO
-    // map.on('touchstart', onErasePointer);   // <- QUITADO
-}
+    // Pointer Events
+    map.on('pointerdown', onEraseDown);
+    map.on('pointermove', onEraseMove);
+    map.on('pointerup', onEraseUp);
+    map.on('pointercancel', onEraseUp);
 
+    // Fallback mouse clásico
+    map.on('mousedown', onEraseMouseDown);
+    map.on('mousemove', onEraseMouseMove);
+    L.DomEvent.on(document, 'mouseup', onEraseMouseUp);
+
+    drawnItems.eachLayer(layer => {
+        layer.off && layer.off('click');
+        layer.off && layer.off('touchstart');
+    });
+
+    toggleUI(false);
+}
 function disableEraser() {
+    if (mode === 'eraser') mode = 'idle';
     eraserButton.classList.remove('active');
     map.dragging.enable();
     showPanel('panel');
+
     const c = map.getContainer();
     c.style.cursor = '';
     c.style.touchAction = '';
 
-    map.off('pointerdown', onErasePointer);
-    erasing = false;
+    map.off('pointerdown', onEraseDown);
+    map.off('pointermove', onEraseMove);
+    map.off('pointerup', onEraseUp);
+    map.off('pointercancel', onEraseUp);
+
+    map.off('mousedown', onEraseMouseDown);
+    map.off('mousemove', onEraseMouseMove);
+    L.DomEvent.off(document, 'mouseup', onEraseMouseUp);
+
+    erasingDrag = false;
+    lastEraseTs = 0;
 }
 
-// Borra la polyline más cercana al punto táctil si está dentro de la tolerancia
-function onErasePointer(e) {
-    // >>> NO BORRAR si el toque/click viene desde un control (botones, geocoder, etc.)
-    const src = e.originalEvent?.target;
-    if (src && (src.closest('.leaflet-control') || src.closest('.pencil-wrapper'))) {
-        return; // no hagas nada; deja que el control funcione
-    }
+/* ----- Pointer Events ----- */
+function onEraseDown(e) {
+    if (mode !== 'eraser') return;
+    if (!eraseShouldStart(e)) return;
 
+    stopEvt(e);
+    erasingDrag = true;
+    lastEraseTs = 0;
+    eraseAtEvent(e);
+}
+function onEraseMove(e) {
+    if (mode !== 'eraser' || !erasingDrag) return;
+    if (!throttleErase()) return;
+
+    stopEvt(e);
+    eraseAtEvent(e);
+}
+function onEraseUp(e) {
+    if (mode !== 'eraser') return;
+    stopEvt(e);
+    erasingDrag = false;
+}
+
+/* ----- Fallback Mouse ----- */
+function onEraseMouseDown(e) {
+    if (mode !== 'eraser') return;
+    if (e.originalEvent?.button !== undefined && e.originalEvent.button !== 0) return;
+    if (!eraseShouldStart(e)) return;
+
+    stopEvt(e);
+    erasingDrag = true;
+    lastEraseTs = 0;
+    eraseAtEvent(e);
+}
+function onEraseMouseMove(e) {
+    if (mode !== 'eraser' || !erasingDrag) return;
+    if (!throttleErase()) return;
+
+    stopEvt(e);
+    eraseAtEvent(e);
+}
+function onEraseMouseUp(e) {
+    if (mode !== 'eraser') return;
+    stopEvt(e);
+    erasingDrag = false;
+}
+
+/* ----- Utilidades de goma ----- */
+function eraseShouldStart(e) {
+    const src = e.originalEvent?.target;
+    if (src && (src.closest('.leaflet-control') || src.closest('.pencil-wrapper'))) return false;
+    if (e.isPrimary === false) return false;
+    if (e.button !== undefined && e.button !== 0) return false;
+    return true;
+}
+function stopEvt(e) {
     e.originalEvent?.preventDefault?.();
     e.originalEvent?.stopPropagation?.();
+}
+function throttleErase() {
+    const now = Date.now();
+    if (now - lastEraseTs < ERASE_THROTTLE_MS) return false;
+    lastEraseTs = now;
+    return true;
+}
 
-    if (erasing) return;
-    erasing = true;
-    setTimeout(() => (erasing = false), 60);
-
+function eraseAtEvent(e) {
     const latlng = e.latlng || map.mouseEventToLatLng(e.originalEvent);
     if (!latlng) return;
 
@@ -215,44 +524,33 @@ function onErasePointer(e) {
     if (!targetLayer) return;
 
     targetLayer.setStyle?.({ opacity: 0.25 });
-    if (navigator.vibrate) navigator.vibrate(25);
+    if (navigator.vibrate) navigator.vibrate(20);
 
     const id = targetLayer._firebaseId;
     if (id) db.collection('shapes').doc(id).delete();
     drawnItems.removeLayer(targetLayer);
 }
 
-
-// Busca la polyline más cercana a 'latlng' dentro de 'tolPx' píxeles
 function findClosestPolyline(latlng, tolPx) {
     const p = map.latLngToLayerPoint(latlng);
-    let best = null;
-    let bestDist = Infinity;
+    let best = null, bestDist = Infinity;
 
     drawnItems.eachLayer(layer => {
         if (!(layer instanceof L.Polyline) || (layer instanceof L.Polygon)) return;
-
         const latlngs = layer.getLatLngs();
-        // Puede venir anidado si es MultiPolyline: aplanamos
         const flat = Array.isArray(latlngs[0]) ? latlngs.flat() : latlngs;
         if (flat.length < 2) return;
 
-        // recorremos segmentos
         for (let i = 0; i < flat.length - 1; i++) {
             const a = map.latLngToLayerPoint(flat[i]);
             const b = map.latLngToLayerPoint(flat[i + 1]);
             const d = distPointToSegment(p, a, b);
-            if (d < bestDist) {
-                bestDist = d;
-                best = layer;
-            }
+            if (d < bestDist) { bestDist = d; best = layer; }
         }
     });
 
     return bestDist <= tolPx ? best : null;
 }
-
-// Distancia (en px) de un punto P a un segmento AB (todo en coordenadas de capa)
 function distPointToSegment(P, A, B) {
     const vx = B.x - A.x, vy = B.y - A.y;
     const wx = P.x - A.x, wy = P.y - A.y;
