@@ -19,21 +19,14 @@ let eraserButton = null;
 const PencilControl = L.Control.extend({
     options: { position: 'topleft' },
     onAdd() {
-        const wrapper = L.DomUtil.create('div', 'leaflet-bar pencil-wrapper mobile-friendly');
-        pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick);
-        eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick);
-
-        // Agrupamos configuraciones en un menú desplegable
-        const configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
-        configPanel.append(makeColorSel(), makeWeightSel());
-        configPanel.style.display = 'none';
-
-        wrapper.append(configPanel);
+        const wrapper = L.DomUtil.create('div', 'leaflet-bar pencil-wrapper');
+        pencilButton = createBtn('✏️', 'custom-pencil', 'Herramienta lápiz', wrapper, handlePencilClick);
+        eraserButton = createBtn('🧽', 'custom-eraser', 'Goma', wrapper, handleEraserClick);
+        wrapper.append(makeColorSel(wrapper), makeWeightSel(wrapper));
         toggleUI('none');
         return wrapper;
     }
 });
-
 map.addControl(new PencilControl());
 
 function createBtn(icon, cls, title, container, onClick) {
@@ -42,49 +35,28 @@ function createBtn(icon, cls, title, container, onClick) {
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
 }
-function makeColorSel() {
-    const s = L.DomUtil.create('div', 'color-selector');
+function makeColorSel(container) {
+    const s = L.DomUtil.create('div', 'color-selector', container);
     ['black', 'white', 'red'].forEach(c => {
         const btn = L.DomUtil.create('div', `pencil-color ${c}`, s);
-        btn.style.width = '24px';
-        btn.style.height = '24px';
-        btn.style.borderRadius = '50%';
-        btn.style.margin = '4px';
-        btn.style.border = '1px solid #999';
-        btn.style.backgroundColor = c;
-        btn.onclick = () => {
-            selectedColor = c;
-            if (pencilButton) pencilButton.style.backgroundColor = c;
-        };
+        btn.onclick = () => { selectedColor = c; if (pencilButton) pencilButton.style.backgroundColor = c; };
     });
     return s;
 }
-
-function makeWeightSel() {
-    const s = L.DomUtil.create('div', 'weight-selector');
-    [
-        { w: 2, l: 'Fino' },
-        { w: 4, l: 'Medio' },
-        { w: 6, l: 'Grueso' }
-    ].forEach(({ w, l }) => {
+function makeWeightSel(container) {
+    const s = L.DomUtil.create('div', 'weight-selector', container);
+    [{ w: 2, l: 'Fino' }, { w: 4, l: 'Medio' }, { w: 6, l: 'Grueso' }].forEach(({ w, l }) => {
         const btn = L.DomUtil.create('div', 'weight-option', s);
-        btn.innerHTML = `<div style="width:24px;height:0;border-top:${w}px solid black;margin-bottom:2px"></div><small>${l}</small>`;
-        btn.style.padding = '4px';
-        btn.style.textAlign = 'center';
-        btn.onclick = () => {
-            selectedWeight = w;
-            [...s.children].forEach(c => c.classList.remove('selected'));
-            btn.classList.add('selected');
-        };
+        btn.innerHTML = `<div style="width:30px;height:0;border-top:${w}px solid black;margin-bottom:2px"></div>${l}`;
+        btn.onclick = () => { selectedWeight = w;[...s.children].forEach(c => c.classList.remove('selected')); btn.classList.add('selected'); };
     });
     return s;
 }
-
 function toggleUI(d) {
-    const panel = pencilButton?.parentElement?.querySelector('.pencil-config-panel');
-    if (panel) panel.style.display = d;
+    const p = pencilButton?.parentElement;
+    p?.querySelector('.color-selector') && (p.querySelector('.color-selector').style.display = d);
+    p?.querySelector('.weight-selector') && (p.querySelector('.weight-selector').style.display = d);
 }
-
 function handlePencilClick() { disableEraser(); pencilButton.classList.contains('active') ? disablePencil() : enablePencil(); }
 function handleEraserClick() { disablePencil(); eraserButton.classList.contains('active') ? disableEraser() : enableEraser(); }
 
@@ -196,97 +168,100 @@ const ERASE_TOLERANCE_PX = 22; // ancho de “acierto” alrededor del dedo
 let erasing = false;
 
 function enableEraser() {
-  eraserButton.classList.add('active');
-  map.dragging.disable();
-  hidePanel('panel');
-  const c = map.getContainer();
-  c.style.cursor = 'crosshair';
-  c.style.touchAction = 'none';
+    eraserButton.classList.add('active');
+    map.dragging.disable();
+    hidePanel('panel');
+    const c = map.getContainer();
+    c.style.cursor = 'crosshair';
+    c.style.touchAction = 'none';
 
-  // Usamos pointer/mouse/touch sobre el MAPA, no sobre la polyline
-  map.on('pointerdown', onErasePointer, { passive: false });
-  map.on('click', onErasePointer, { passive: false }); // por si algún navegador no emite pointer
-  map.on('touchstart', onErasePointer, { passive: false });
+    // Solo pointerdown: evita el doble disparo click+pointer
+    map.on('pointerdown', onErasePointer, { passive: false });
+    // map.on('click', onErasePointer);        // <- QUITADO
+    // map.on('touchstart', onErasePointer);   // <- QUITADO
 }
 
 function disableEraser() {
-  eraserButton.classList.remove('active');
-  map.dragging.enable();
-  showPanel('panel');
-  const c = map.getContainer();
-  c.style.cursor = '';
-  c.style.touchAction = '';
+    eraserButton.classList.remove('active');
+    map.dragging.enable();
+    showPanel('panel');
+    const c = map.getContainer();
+    c.style.cursor = '';
+    c.style.touchAction = '';
 
-  map.off('pointerdown', onErasePointer);
-  map.off('click', onErasePointer);
-  map.off('touchstart', onErasePointer);
-  erasing = false;
+    map.off('pointerdown', onErasePointer);
+    erasing = false;
 }
 
 // Borra la polyline más cercana al punto táctil si está dentro de la tolerancia
 function onErasePointer(e) {
-  e.originalEvent?.preventDefault?.();
-  e.originalEvent?.stopPropagation?.();
+    // >>> NO BORRAR si el toque/click viene desde un control (botones, geocoder, etc.)
+    const src = e.originalEvent?.target;
+    if (src && (src.closest('.leaflet-control') || src.closest('.pencil-wrapper'))) {
+        return; // no hagas nada; deja que el control funcione
+    }
 
-  if (erasing) return; // evita dobles disparos (click + pointer)
-  erasing = true;
-  setTimeout(() => (erasing = false), 60);
+    e.originalEvent?.preventDefault?.();
+    e.originalEvent?.stopPropagation?.();
 
-  const latlng = e.latlng || map.mouseEventToLatLng(e.originalEvent);
-  if (!latlng) return;
+    if (erasing) return;
+    erasing = true;
+    setTimeout(() => (erasing = false), 60);
 
-  const targetLayer = findClosestPolyline(latlng, ERASE_TOLERANCE_PX);
-  if (!targetLayer) return;
+    const latlng = e.latlng || map.mouseEventToLatLng(e.originalEvent);
+    if (!latlng) return;
 
-  // feedback visual y háptico
-  targetLayer.setStyle?.({ opacity: 0.25 });
-  if (navigator.vibrate) navigator.vibrate(25);
+    const targetLayer = findClosestPolyline(latlng, ERASE_TOLERANCE_PX);
+    if (!targetLayer) return;
 
-  // eliminar de Firebase y del mapa
-  const id = targetLayer._firebaseId;
-  if (id) db.collection('shapes').doc(id).delete();
-  drawnItems.removeLayer(targetLayer);
+    targetLayer.setStyle?.({ opacity: 0.25 });
+    if (navigator.vibrate) navigator.vibrate(25);
+
+    const id = targetLayer._firebaseId;
+    if (id) db.collection('shapes').doc(id).delete();
+    drawnItems.removeLayer(targetLayer);
 }
+
 
 // Busca la polyline más cercana a 'latlng' dentro de 'tolPx' píxeles
 function findClosestPolyline(latlng, tolPx) {
-  const p = map.latLngToLayerPoint(latlng);
-  let best = null;
-  let bestDist = Infinity;
+    const p = map.latLngToLayerPoint(latlng);
+    let best = null;
+    let bestDist = Infinity;
 
-  drawnItems.eachLayer(layer => {
-    if (!(layer instanceof L.Polyline) || (layer instanceof L.Polygon)) return;
+    drawnItems.eachLayer(layer => {
+        if (!(layer instanceof L.Polyline) || (layer instanceof L.Polygon)) return;
 
-    const latlngs = layer.getLatLngs();
-    // Puede venir anidado si es MultiPolyline: aplanamos
-    const flat = Array.isArray(latlngs[0]) ? latlngs.flat() : latlngs;
-    if (flat.length < 2) return;
+        const latlngs = layer.getLatLngs();
+        // Puede venir anidado si es MultiPolyline: aplanamos
+        const flat = Array.isArray(latlngs[0]) ? latlngs.flat() : latlngs;
+        if (flat.length < 2) return;
 
-    // recorremos segmentos
-    for (let i = 0; i < flat.length - 1; i++) {
-      const a = map.latLngToLayerPoint(flat[i]);
-      const b = map.latLngToLayerPoint(flat[i + 1]);
-      const d = distPointToSegment(p, a, b);
-      if (d < bestDist) {
-        bestDist = d;
-        best = layer;
-      }
-    }
-  });
+        // recorremos segmentos
+        for (let i = 0; i < flat.length - 1; i++) {
+            const a = map.latLngToLayerPoint(flat[i]);
+            const b = map.latLngToLayerPoint(flat[i + 1]);
+            const d = distPointToSegment(p, a, b);
+            if (d < bestDist) {
+                bestDist = d;
+                best = layer;
+            }
+        }
+    });
 
-  return bestDist <= tolPx ? best : null;
+    return bestDist <= tolPx ? best : null;
 }
 
 // Distancia (en px) de un punto P a un segmento AB (todo en coordenadas de capa)
 function distPointToSegment(P, A, B) {
-  const vx = B.x - A.x, vy = B.y - A.y;
-  const wx = P.x - A.x, wy = P.y - A.y;
-  const c1 = vx * wx + vy * wy;
-  if (c1 <= 0) return Math.hypot(P.x - A.x, P.y - A.y);
-  const c2 = vx * vx + vy * vy;
-  if (c2 <= c1) return Math.hypot(P.x - B.x, P.y - B.y);
-  const t = c1 / c2;
-  const projX = A.x + t * vx;
-  const projY = A.y + t * vy;
-  return Math.hypot(P.x - projX, P.y - projY);
+    const vx = B.x - A.x, vy = B.y - A.y;
+    const wx = P.x - A.x, wy = P.y - A.y;
+    const c1 = vx * wx + vy * wy;
+    if (c1 <= 0) return Math.hypot(P.x - A.x, P.y - A.y);
+    const c2 = vx * vx + vy * vy;
+    if (c2 <= c1) return Math.hypot(P.x - B.x, P.y - B.y);
+    const t = c1 / c2;
+    const projX = A.x + t * vx;
+    const projY = A.y + t * vy;
+    return Math.hypot(P.x - projX, P.y - projY);
 }
