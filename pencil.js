@@ -8,7 +8,6 @@ import { hidePanel, showPanel } from './panel.js';
    Estado / Config
 ========================= */
 let mode = 'idle'; // 'idle' | 'pencil' | 'eraser'
-
 let isDrawing = false;
 let currentLine = null;
 let currentRef = null;           // doc ref Firestore del trazo en curso
@@ -21,6 +20,53 @@ let selectedWeight = 4;          // default medio
 
 let pencilButton = null;
 let eraserButton = null;
+let configPanel = null;
+
+/* =========================
+   Helpers UI
+========================= */
+const setStyles = (el, styles) => Object.assign(el.style, styles);
+
+// 🟢 versión compacta
+const chipBase = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '6px 8px',
+    cursor: 'pointer',
+    borderRadius: '8px',
+    userSelect: 'none',
+    border: '1px solid #e5e7eb',
+    background: '#fafafa',
+    minHeight: '36px' // más chico que 44px
+};
+
+const markSelected = (btn, group) => {
+    [...group.children].forEach(c => {
+        c.classList.remove('selected');
+        c.style.background = '#fafafa';
+        c.style.borderColor = '#e5e7eb';
+        c.style.boxShadow = 'none';
+    });
+    btn.classList.add('selected');
+    btn.style.background = '#eef4ff';
+    btn.style.borderColor = '#bdd0ff';
+    btn.style.boxShadow = '0 0 0 1px #bdd0ff inset';
+};
+
+const makeChip = (parent) => {
+    const b = L.DomUtil.create('button', 'chip', parent);
+    b.type = 'button';
+    setStyles(b, chipBase);
+    b.tabIndex = 0;
+    b.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            b.click();
+        }
+    });
+    return b;
+};
 
 /* =========================
    UI del control
@@ -29,70 +75,204 @@ const PencilControl = L.Control.extend({
     options: { position: 'topleft' },
     onAdd() {
         const wrapper = L.DomUtil.create('div', 'leaflet-bar pencil-wrapper mobile-friendly');
-
-        // Evita que el mapa capture drag/click del control
         L.DomEvent.disableClickPropagation(wrapper);
         L.DomEvent.disableScrollPropagation(wrapper);
+        setStyles(wrapper, { position: 'relative', overflow: 'visible' });
 
-        pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick);
-        eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick);
+        pencilButton = createBtn('✏️', 'custom-pencil', 'Dibujar', wrapper, handlePencilClick, true);
+        eraserButton = createBtn('🧽', 'custom-eraser', 'Borrar', wrapper, handleEraserClick, false);
 
-        const configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
-        configPanel.style.display = 'none';
-        configPanel.style.flexDirection = 'column';
-        configPanel.style.padding = '6px';
-        configPanel.append(makeColorSel(), makeWeightSel());
 
-        wrapper.append(configPanel);
-        toggleUI('none');
+        // Panel dropdown (más angosto y con menos padding)
+        configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
+        setStyles(configPanel, {
+            position: 'absolute',
+            top: '100%',
+            left: '0',
+            display: 'none',
+            background: '#fff',
+            border: '1px solid #d1d5db',
+            borderRadius: '10px',
+            boxShadow: '0 8px 20px rgba(0,0,0,.16)',
+            zIndex: '2000',
+            minWidth: '200px',   // antes 260px
+            padding: '8px'       // antes 12px
+        });
+        L.DomEvent.disableClickPropagation(configPanel);
+        L.DomEvent.disableScrollPropagation(configPanel);
+
+        // Grid 2 columnas compacto
+        const grid = L.DomUtil.create('div', 'pencil-grid', configPanel);
+        setStyles(grid, {
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '8px 12px',     // menos separación
+            alignItems: 'start'
+        });
+
+        const colorWrap = L.DomUtil.create('div', 'pencil-section-colors', grid);
+        colorWrap.innerHTML = `<div style="font:600 11px/1.1 system-ui, sans-serif;margin:0 0 6px;">Color</div>`;
+        colorWrap.append(makeColorSelector());
+
+        const weightWrap = L.DomUtil.create('div', 'pencil-section-weights', grid);
+        weightWrap.innerHTML = `<div style="font:600 11px/1.1 system-ui, sans-serif;margin:0 0 6px;">Grosor</div>`;
+        weightWrap.append(makeWeightSelector());
+
+        // Responsive aún más compacto
+        const applyResponsive = () => {
+            const oneCol = window.innerWidth < 360; // era 420
+            grid.style.gridTemplateColumns = oneCol ? '1fr' : '1fr 1fr';
+            configPanel.style.minWidth = oneCol ? '180px' : '200px';
+        };
+        applyResponsive();
+        window.addEventListener('resize', applyResponsive);
+
+        // Cierre
+        document.addEventListener('click', onDocClickClose, true);
+        document.addEventListener('keydown', onEscClose, true);
+
+        toggleUI(false);
+        updatePencilPreview();
         return wrapper;
     }
 });
+
 map.addControl(new PencilControl());
 
-function createBtn(icon, cls, title, container, onClick) {
+function createBtn(icon, cls, title, container, onClick, withPreview = false) {
     const a = L.DomUtil.create('a', cls, container);
-    a.innerHTML = icon; a.href = '#'; a.title = title;
+    a.href = '#';
+    a.title = title;
+    a.setAttribute('role', 'button');
+    a.setAttribute('aria-label', title);
+
+    a.innerHTML = `<span class="icon" style="display:block;line-height:16px;text-align:center;">${icon}</span>`;
+
+    // Solo agregar previsualizador si withPreview es true
+    if (withPreview) {
+        a.innerHTML += `<div class="stroke-preview" 
+        style="width:20px;height:0;
+        border-top:4px solid black;
+        margin:4px auto 2px;
+        border-radius:2px;">
+      </div>`;
+    }
+
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
 }
-function makeColorSel() {
+
+
+/* =========================
+   Selectores (sin texto en opciones)
+========================= */
+function makeColorSelector() {
     const s = L.DomUtil.create('div', 'color-selector');
-    ['black', 'white', 'red'].forEach(c => {
-        const btn = L.DomUtil.create('div', `pencil-color ${c}`, s);
-        Object.assign(btn.style, {
-            width: '24px', height: '24px', borderRadius: '50%',
-            margin: '4px', border: '1px solid #999', backgroundColor: c, cursor: 'pointer'
+    setStyles(s, { display: 'flex', flexDirection: 'column', gap: '6px' });
+
+    const colors = [
+        'black', 'white',
+        '#e11d48', '#10b981'
+    ];
+
+    colors.forEach((name) => {
+        const btn = makeChip(s);
+        btn.className = `chip color-chip`;
+        btn.title = `Color ${name}`;
+        btn.setAttribute('aria-label', `Color ${name}`);
+
+        // Swatch circular más chico
+        const svg = svgEl('svg', { width: 22, height: 22, viewBox: '0 0 22 22', style: 'margin:auto' });
+        const circle = svgEl('circle', {
+            cx: 11, cy: 11, r: 9,
+            fill: name,
+            stroke: (name === 'white' ? '#9ca3af' : 'none'),
+            'stroke-width': 1
         });
+        svg.appendChild(circle);
+
+        btn.append(svg);
+
+        if (selectedColor === name) markSelected(btn, s);
+
         btn.onclick = () => {
-            selectedColor = c;
-            if (pencilButton) pencilButton.style.backgroundColor = c;
+            selectedColor = name;
+            markSelected(btn, s);
+            updatePencilPreview();
+            s.parentElement?.parentElement
+                ?.querySelectorAll('.weight-chip svg line')
+                .forEach(line => line.setAttribute('stroke', selectedColor));
         };
     });
+
     return s;
 }
-function makeWeightSel() {
+
+function makeWeightSelector() {
     const s = L.DomUtil.create('div', 'weight-selector');
-    [{ w: 2, l: 'Fino' }, { w: 4, l: 'Medio' }, { w: 6, l: 'Grueso' }].forEach(({ w, l }) => {
-        const btn = L.DomUtil.create('div', 'weight-option', s);
-        btn.innerHTML = `<div style="width:24px;height:0;border-top:${w}px solid black;margin-bottom:2px"></div><small>${l}</small>`;
-        Object.assign(btn.style, { padding: '4px', textAlign: 'center', cursor: 'pointer' });
+    setStyles(s, { display: 'flex', flexDirection: 'column', gap: '6px' });
+
+    const options = [2, 4, 6, 10];
+
+    options.forEach((w) => {
+        const btn = makeChip(s);
+        btn.className = 'chip weight-chip';
+        btn.title = `Grosor ${w}px`;
+        btn.setAttribute('aria-label', `Grosor ${w}px`);
+
+        // Línea de muestra más corta/compacta
+        const svg = svgEl('svg', { width: 60, height: 18, viewBox: '0 0 60 18', style: 'margin:auto' });
+        const line = svgEl('line', {
+            x1: 6, y1: 9, x2: 54, y2: 9,
+            stroke: selectedColor,
+            'stroke-width': String(w),
+            'stroke-linecap': 'round'
+        });
+        svg.appendChild(line);
+        btn.append(svg);
+
+        if (selectedWeight === w) markSelected(btn, s);
+
         btn.onclick = () => {
             selectedWeight = w;
-            [...s.children].forEach(c => c.classList.remove('selected'));
-            btn.classList.add('selected');
+            markSelected(btn, s);
             updatePencilPreview();
         };
     });
+
     return s;
 }
-function updatePencilPreview() {
-    if (!pencilButton) return;
-    pencilButton.innerHTML = `<div style="width:24px;height:0;border-top:${selectedWeight}px solid ${selectedColor};margin:10px auto;"></div>`;
+
+function svgEl(tag, attrs) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, String(v)));
+    return el;
 }
-function toggleUI(display) {
-    const panel = pencilButton?.parentElement?.querySelector('.pencil-config-panel');
-    if (panel) panel.style.display = display;
+
+function updatePencilPreview() {
+    if (pencilButton) {
+        const preview = pencilButton.querySelector('.stroke-preview');
+        if (preview) preview.style.borderTop = `${selectedWeight}px solid ${selectedColor}`;
+        pencilButton.style.boxShadow = (selectedColor === 'white')
+            ? 'inset 0 0 0 2px rgba(0,0,0,.25)'
+            : 'inset 0 0 0 2px rgba(0,0,0,.08)';
+    }
+    document.querySelectorAll('.weight-chip svg line').forEach(line => {
+        line.setAttribute('stroke', selectedColor);
+    });
+}
+
+function toggleUI(show) {
+    if (!configPanel) return;
+    configPanel.style.display = show ? 'block' : 'none';
+}
+function onDocClickClose(e) {
+    if (!configPanel || mode !== 'pencil') return;
+    const target = e.target;
+    if (!target.closest('.pencil-wrapper')) toggleUI(false);
+}
+function onEscClose(e) {
+    if (e.key === 'Escape' && mode === 'pencil') toggleUI(false);
 }
 
 /* =========================
@@ -107,14 +287,20 @@ function handleEraserClick() {
     (mode === 'eraser') ? disableEraser() : enableEraser();
 }
 
+// Export util para apagar cualquier herramienta activa desde otros módulos
+export function deactivateDrawingTools() {
+    // Desactiva ambos por si alguno está activo
+    disablePencil();
+    disableEraser();
+}
+
 /* =========================
    LÁPIZ (Leaflet events)
 ========================= */
 function enablePencil() {
     mode = 'pencil';
     pencilButton.classList.add('active');
-    pencilButton.style.backgroundColor = selectedColor;
-    toggleUI('flex');
+    toggleUI(true);
     updatePencilPreview();
 
     map.dragging.disable();
@@ -131,8 +317,7 @@ function enablePencil() {
 function disablePencil() {
     if (mode === 'pencil') mode = 'idle';
     pencilButton.classList.remove('active');
-    pencilButton.style.backgroundColor = selectedColor;
-    toggleUI('none');
+    toggleUI(false);
 
     map.dragging.enable();
     showPanel('panel');
@@ -156,6 +341,7 @@ function goodStart(ev) {
     if (t.closest?.('.leaflet-control')) return false;
     return true;
 }
+
 function onDown(ev) {
     if (mode !== 'pencil') return;
     if (ev.originalEvent?.button !== undefined && ev.originalEvent.button !== 0) return;
@@ -174,7 +360,6 @@ function onDown(ev) {
 
     const style = { color: selectedColor, weight: selectedWeight };
     const geoPoints = [new firebase.firestore.GeoPoint(start.lat, start.lng)];
-
     currentRef.set({ type: 'pencil', points: geoPoints, style, updatedAt: Date.now() });
 
     // línea local
@@ -183,6 +368,7 @@ function onDown(ev) {
     drawnItems.addLayer(currentLine);
     lastUpdate = 0;
 }
+
 function onMove(ev) {
     if (mode !== 'pencil') return;
     if (!isDrawing || !currentLine) return;
@@ -195,6 +381,7 @@ function onMove(ev) {
     points.push(ll);
     maybePush();
 }
+
 function onUp(ev) {
     if (mode !== 'pencil') return;
     if (!isDrawing) return;
@@ -207,9 +394,9 @@ function onUp(ev) {
     points = [];
 }
 
-function geoPointArray() {
-    return points.map(ll => new firebase.firestore.GeoPoint(ll.lat, ll.lng));
-}
+const geoPointArray = () =>
+    points.map(ll => new firebase.firestore.GeoPoint(ll.lat, ll.lng));
+
 function pushAll() {
     if (!currentRef) return;
     currentRef.set({ points: geoPointArray(), updatedAt: Date.now() }, { merge: true });
@@ -223,14 +410,20 @@ function maybePush() {
 }
 
 /* =========================
-   GOMA (touch-friendly)
+   GOMA
 ========================= */
-const ERASE_TOLERANCE_PX = 22; // “ancho” de acierto alrededor del dedo
-let erasing = false;
+const ERASE_TOLERANCE_PX = 22;
+const ERASE_THROTTLE_MS = 40;
+let erasingDrag = false;
+let lastEraseTs = 0;
 
 function enableEraser() {
     mode = 'eraser';
     eraserButton.classList.add('active');
+
+    // 🔹 Ocultar botón del lápiz mientras se usa la goma
+    if (pencilButton) pencilButton.style.display = 'none';
+
     map.dragging.disable();
     hidePanel('panel');
 
@@ -238,18 +431,32 @@ function enableEraser() {
     c.style.cursor = 'crosshair';
     c.style.touchAction = 'none';
 
-    // Solo pointerdown para evitar duplicados click+pointer
-    map.on('pointerdown', onErasePointer);
+    // Pointer Events
+    map.on('pointerdown', onEraseDown);
+    map.on('pointermove', onEraseMove);
+    map.on('pointerup', onEraseUp);
+    map.on('pointercancel', onEraseUp);
 
-    // Limpieza por si versiones previas dejaron listeners en capas
+    // Fallback mouse clásico
+    map.on('mousedown', onEraseMouseDown);
+    map.on('mousemove', onEraseMouseMove);
+    L.DomEvent.on(document, 'mouseup', onEraseMouseUp);
+
     drawnItems.eachLayer(layer => {
         layer.off && layer.off('click');
         layer.off && layer.off('touchstart');
     });
+
+    toggleUI(false);
 }
+
 function disableEraser() {
     if (mode === 'eraser') mode = 'idle';
     eraserButton.classList.remove('active');
+
+    // 🔹 Mostrar de nuevo el botón del lápiz
+    if (pencilButton) pencilButton.style.display = '';
+
     map.dragging.enable();
     showPanel('panel');
 
@@ -257,36 +464,96 @@ function disableEraser() {
     c.style.cursor = '';
     c.style.touchAction = '';
 
-    map.off('pointerdown', onErasePointer);
-    erasing = false;
+    map.off('pointerdown', onEraseDown);
+    map.off('pointermove', onEraseMove);
+    map.off('pointerup', onEraseUp);
+    map.off('pointercancel', onEraseUp);
+
+    map.off('mousedown', onEraseMouseDown);
+    map.off('mousemove', onEraseMouseMove);
+    L.DomEvent.off(document, 'mouseup', onEraseMouseUp);
+
+    erasingDrag = false;
+    lastEraseTs = 0;
 }
 
-// Borra la polyline más cercana al toque si está dentro de la tolerancia
-function onErasePointer(e) {
+
+/* ----- Pointer Events ----- */
+function onEraseDown(e) {
     if (mode !== 'eraser') return;
+    if (!eraseShouldStart(e)) return;
 
-    // No borres si el toque viene de un control
+    stopEvt(e);
+    erasingDrag = true;
+    lastEraseTs = 0;
+    eraseAtEvent(e);
+}
+function onEraseMove(e) {
+    if (mode !== 'eraser' || !erasingDrag) return;
+    if (!throttleErase()) return;
+
+    stopEvt(e);
+    eraseAtEvent(e);
+}
+function onEraseUp(e) {
+    if (mode !== 'eraser') return;
+    stopEvt(e);
+    erasingDrag = false;
+}
+
+/* ----- Fallback Mouse ----- */
+function onEraseMouseDown(e) {
+    if (mode !== 'eraser') return;
+    if (e.originalEvent?.button !== undefined && e.originalEvent.button !== 0) return;
+    if (!eraseShouldStart(e)) return;
+
+    stopEvt(e);
+    erasingDrag = true;
+    lastEraseTs = 0;
+    eraseAtEvent(e);
+}
+function onEraseMouseMove(e) {
+    if (mode !== 'eraser' || !erasingDrag) return;
+    if (!throttleErase()) return;
+
+    stopEvt(e);
+    eraseAtEvent(e);
+}
+function onEraseMouseUp(e) {
+    if (mode !== 'eraser') return;
+    stopEvt(e);
+    erasingDrag = false;
+}
+
+/* ----- Utilidades de goma ----- */
+function eraseShouldStart(e) {
     const src = e.originalEvent?.target;
-    if (src && (src.closest('.leaflet-control') || src.closest('.pencil-wrapper'))) return;
-
+    if (src && (src.closest('.leaflet-control') || src.closest('.pencil-wrapper'))) return false;
+    if (e.isPrimary === false) return false;
+    if (e.button !== undefined && e.button !== 0) return false;
+    return true;
+}
+function stopEvt(e) {
     e.originalEvent?.preventDefault?.();
     e.originalEvent?.stopPropagation?.();
+}
+function throttleErase() {
+    const now = Date.now();
+    if (now - lastEraseTs < ERASE_THROTTLE_MS) return false;
+    lastEraseTs = now;
+    return true;
+}
 
-    if (erasing) return; // evita dobles disparos
-    erasing = true;
-    setTimeout(() => (erasing = false), 60);
-
+function eraseAtEvent(e) {
     const latlng = e.latlng || map.mouseEventToLatLng(e.originalEvent);
     if (!latlng) return;
 
     const targetLayer = findClosestPolyline(latlng, ERASE_TOLERANCE_PX);
     if (!targetLayer) return;
 
-    // feedback visual y háptico
     targetLayer.setStyle?.({ opacity: 0.25 });
-    if (navigator.vibrate) navigator.vibrate(25);
+    if (navigator.vibrate) navigator.vibrate(20);
 
-    // eliminar de Firebase y del mapa
     const id = targetLayer._firebaseId;
     if (id) db.collection('shapes').doc(id).delete();
     drawnItems.removeLayer(targetLayer);
@@ -294,14 +561,12 @@ function onErasePointer(e) {
 
 function findClosestPolyline(latlng, tolPx) {
     const p = map.latLngToLayerPoint(latlng);
-    let best = null;
-    let bestDist = Infinity;
+    let best = null, bestDist = Infinity;
 
     drawnItems.eachLayer(layer => {
         if (!(layer instanceof L.Polyline) || (layer instanceof L.Polygon)) return;
-
         const latlngs = layer.getLatLngs();
-        const flat = Array.isArray(latlngs[0]) ? latlngs.flat() : latlngs; // MultiPolyline safe
+        const flat = Array.isArray(latlngs[0]) ? latlngs.flat() : latlngs;
         if (flat.length < 2) return;
 
         for (let i = 0; i < flat.length - 1; i++) {
