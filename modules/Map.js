@@ -17,6 +17,7 @@ if (!map) {
         maxZoom: 18,           // acercar a nivel ciudad
         zoomControl: true,
         attributionControl: false,
+        maxNativeZoom: 18
 
         // === Performance / UX ===
         preferCanvas: true,
@@ -45,7 +46,9 @@ if (!map) {
         updateWhenIdle: true,
         updateWhenZooming: false,
         keepBuffer: 1,
-        className: 'filtered-tile'
+        className: 'filtered-tile',
+        maxNativeZoom: 18
+        
     };
 
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -190,6 +193,7 @@ if (!map) {
 }
 
 export { map };
+
 
 
 
