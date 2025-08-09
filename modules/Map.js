@@ -22,7 +22,7 @@ if (!map) {
         preferCanvas: true,
         inertia: false,
         wheelDebounceTime: 40,
-        wheelPxPerZoomLevel: 120,
+        wheelPxPerZoomLevel: 100,
 
         // Límites y no-wrap
         worldCopyJump: false,
@@ -190,4 +190,5 @@ if (!map) {
 }
 
 export { map };
+
 
