@@ -9,6 +9,9 @@ body,
   touch-action: pan-y;
 }
 
+html, body, #app, #map-wrapper { height: 100%; }
+#map { height: 100%; min-height: 300px; }
+
 .filtered-tile {
   filter: grayscale(100%) brightness(60%) contrast(140%) hue-rotate(30deg) sepia(40%) saturate(130%) blur(0.3px);
 }
@@ -120,7 +123,7 @@ button {
   display: none;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   margin-top: 4px;
 }
 
@@ -160,36 +163,6 @@ button {
 /* que el panel no invada el mapa cuando está visible */
 #panel { z-index: 1100; }
 .leaflet-container { z-index: 1; }
-
-.pencil-wrapper.mobile-friendly {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-}
-
-.pencil-config-panel {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    background: rgba(255,255,255,0.9);
-    border-radius: 6px;
-    padding: 6px;
-    box-shadow: 0 1px 5px rgba(0,0,0,0.3);
-    z-index: 999;
-}
-
-.color-selector, .weight-selector {
-    display: flex;
-    justify-content: center;
-    gap: 4px;
-    margin: 4px 0;
-    flex-wrap: wrap;
-}
-
-.weight-option.selected {
-    background: #ddd;
-    border-radius: 4px;
-}
-
+ 
 .leaflet-top, .leaflet-bottom { z-index: 1200 !important; }
+.pencil-color.selected { outline: 2px solid #2e7dff; }
