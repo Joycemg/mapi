@@ -21,6 +21,7 @@ function getNotesRef() {
 /** ================= Config ================= */
 const ICON_SIZE = 25;   // icono circular (no escala con zoom por el pane)
 const ZOOM_LABEL = 15;  // mostrar título a partir de este zoom
+const FLYTO_ZOOM = 18;  // zoom al ir a una nota desde el menú
 
 /** ================= Estado ================= */
 let noteMode = false;
@@ -29,6 +30,12 @@ let labelVisible = false;
 const noteMarkers = {};         // id -> { marker, data }
 let rtUnsubscribe = null;
 let controlAdded = false;
+
+let listControlAdded = false;
+let listBtn = null;
+let listPanel = null;
+let listFilter = '';
+let listOpen = false;
 
 /** ================= Pane propio ================= */
 const notesPaneName = 'notesPane';
@@ -51,33 +58,70 @@ function ensureNotesCss() {
     /* No romper el posicionamiento del marker */
     .note-divicon { will-change: transform; overflow: visible; }
 
-    .leaflet-bar.notes-wrapper a { width: 30px; height: 30px; line-height: 30px; text-align:center; }
-    .leaflet-bar.notes-wrapper a.active { background:#2563eb; color:#fff; }
+    .leaflet-bar.notes-wrapper a,
+    .leaflet-bar.noteslist-wrapper a { width: 30px; height: 30px; line-height: 30px; text-align:center; }
+    .leaflet-bar.notes-wrapper a.active,
+    .leaflet-bar.noteslist-wrapper a.active { background:#2563eb; color:#fff; }
 
     /* --- POPUP de notas: tamaño fijo + scroll --- */
     .note-popup .leaflet-popup-content {
-      max-height: 260px;   /* ajustá a gusto */
+      max-height: 260px;
       overflow-y: auto;
       overflow-x: hidden;
-      padding-right: 6px;  /* que no tape el scroll */
+      padding-right: 6px;
     }
-
-    /* que el body de la vista scrollee sin mover botones */
-    .note-popup .note-scroll {
-      max-height: 180px;
-      overflow-y: auto;
-      margin-bottom: 8px;
-    }
-
-    /* scroll suave en Win */
+    .note-popup .note-scroll { max-height: 180px; overflow-y: auto; margin-bottom: 8px; }
     .note-popup .note-scroll, .note-popup .leaflet-popup-content { scrollbar-gutter: stable; }
+
+    /* --- Panel lista de notas --- */
+    .noteslist-panel {
+      position: absolute;
+      top: 36px;
+      left: 0;
+      width: 260px;
+      max-height: 320px;
+      background: #fff;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      box-shadow: 0 8px 20px rgba(0,0,0,.12);
+      overflow: hidden;
+      display: none;
+      z-index: 1001;
+      font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    .noteslist-panel.open { display: block; }
+
+    .noteslist-header {
+      display: flex; gap: 6px; align-items: center;
+      padding: 8px; border-bottom: 1px solid #e5e7eb;
+      background: #f9fafb;
+    }
+    .noteslist-header input {
+      flex: 1; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px;
+    }
+    .noteslist-header button {
+      border: 1px solid #d1d5db; background: #fff; border-radius: 6px; padding: 6px 8px; cursor: pointer;
+    }
+
+    .noteslist-list { max-height: 260px; overflow: auto; }
+    .noteslist-item {
+      display: grid; grid-template-columns: 1fr auto; gap: 8px;
+      padding: 8px 10px; border-bottom: 1px solid #f3f4f6; cursor: pointer;
+    }
+    .noteslist-item:hover { background: #f8fafc; }
+    .noteslist-title { font-weight: 600; color: #111827; }
+    .noteslist-sub { font-size: 11px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .noteslist-pill {
+      align-self: center; font-size: 10px; padding: 2px 6px; border-radius: 999px; border: 1px solid #d1d5db; color: #374151;
+    }
+
+    .noteslist-empty { padding: 12px; text-align: center; color: #6b7280; }
   `;
     document.head.appendChild(style);
 }
 
 /** ================= Iconos predefinidos ================= */
 const PRESET_ICONS = [
-    { value: 'note', label: 'Nota' },
     { value: 'shelter', label: 'Refugio (Casa)' },
     { value: 'danger', label: 'Peligro (X)' },
     { value: 'skull', label: 'Calavera' },
@@ -89,16 +133,21 @@ const PRESET_ICONS = [
     { value: 'camp', label: 'Fogata' },
     { value: 'radio', label: 'Radio' },
     { value: 'medic', label: 'Médico (+)' },
-    { value: 'wrench', label: 'Herramienta' }
+    { value: 'wrench', label: 'Herramienta' },
+    { value: 'note', label: 'Nota' },
 ];
 
-/** ================= Helpers SVG ================= */
+/** ================= Helpers ================= */
 function svgEl(tag, attrs = {}) {
     const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
     return el;
 }
+function presetLabelFor(value) {
+    return PRESET_ICONS.find(p => p.value === value)?.label || 'Nota';
+}
 
+/** ================= Iconos SVG ================= */
 function buildPresetIconNode(type, size, color) {
     const wrap = document.createElement('div');
     Object.assign(wrap.style, { width: `${size}px`, height: `${size}px`, display: 'grid', placeItems: 'center' });
@@ -191,7 +240,7 @@ function buildPresetIconNode(type, size, color) {
     return wrap;
 }
 
-/** ================= Control UI ================= */
+/** ================= Control UI: botón de creación ================= */
 const NotesControl = L.Control.extend({
     options: { position: 'topleft' },
     onAdd() {
@@ -206,11 +255,35 @@ const NotesControl = L.Control.extend({
         return wrapper;
     }
 });
-
 function addControlOnce() {
     if (controlAdded) return;
     map.addControl(new NotesControl());
     controlAdded = true;
+}
+
+/** ================= Control UI: lista de notas ================= */
+const NotesListControl = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd() {
+        const wrapper = L.DomUtil.create('div', 'leaflet-bar noteslist-wrapper');
+        L.DomEvent.disableClickPropagation(wrapper);
+        L.DomEvent.disableScrollPropagation(wrapper);
+        Object.assign(wrapper.style, { position: 'relative', overflow: 'visible', zIndex: 1000 });
+
+        listBtn = createBtn('📒', 'noteslist-btn', 'Notas (lista)', wrapper, toggleListPanel);
+
+        // Panel
+        listPanel = L.DomUtil.create('div', 'noteslist-panel', wrapper);
+        listPanel.innerHTML = buildListPanelHtml();
+        bindListPanelEvents();
+
+        return wrapper;
+    }
+});
+function addListControlOnce() {
+    if (listControlAdded) return;
+    map.addControl(new NotesListControl());
+    listControlAdded = true;
 }
 
 function createBtn(icon, cls, title, container, onClick) {
@@ -222,6 +295,115 @@ function createBtn(icon, cls, title, container, onClick) {
     a.innerHTML = `<span style="display:block;line-height:16px;text-align:center;">${icon}</span>`;
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
+}
+
+function toggleListPanel() {
+    listOpen = !listOpen;
+    if (!listPanel) return;
+    listPanel.classList.toggle('open', listOpen);
+    listBtn?.classList.toggle('active', listOpen);
+    if (listOpen) {
+        renderList();
+        const input = listPanel.querySelector('.noteslist-filter');
+        input?.focus();
+    }
+}
+function buildListPanelHtml() {
+    return `
+    <div class="noteslist-header">
+      <input type="search" class="noteslist-filter" placeholder="Buscar notas..." />
+      <button type="button" class="noteslist-clear" title="Limpiar búsqueda">✕</button>
+    </div>
+    <div class="noteslist-list"></div>
+  `;
+}
+function bindListPanelEvents() {
+    if (!listPanel) return;
+    const input = listPanel.querySelector('.noteslist-filter');
+    const clear = listPanel.querySelector('.noteslist-clear');
+    input?.addEventListener('input', (e) => {
+        listFilter = String(e.target.value || '').toLowerCase();
+        renderList();
+    });
+    clear?.addEventListener('click', () => {
+        listFilter = '';
+        if (input) input.value = '';
+        renderList();
+        input?.focus();
+    });
+
+    // Delegación de clicks en items
+    const listEl = listPanel.querySelector('.noteslist-list');
+    listEl?.addEventListener('click', (ev) => {
+        const item = ev.target.closest('.noteslist-item');
+        if (!item) return;
+        const id = item.getAttribute('data-id');
+        if (!id || !noteMarkers[id]) return;
+        openNote(id);
+    });
+}
+
+function renderList() {
+    if (!listPanel) return;
+    const listEl = listPanel.querySelector('.noteslist-list');
+    if (!listEl) return;
+
+    // construir array de notas
+    const items = Object.entries(noteMarkers).map(([id, rec]) => {
+        const d = rec.data || {};
+        return {
+            id,
+            title: d.title || 'Nota',
+            body: d.body || '',
+            iconType: d.iconType || 'note',
+            updatedAt: d.updatedAt || d.createdAt || 0
+        };
+    });
+
+    // filtrar + ordenar (actualizadas primero)
+    let filtered = items;
+    if (listFilter) {
+        filtered = items.filter(it =>
+            it.title.toLowerCase().includes(listFilter) ||
+            it.body.toLowerCase().includes(listFilter)
+        );
+    }
+    filtered.sort((a, b) => (b.updatedAt - a.updatedAt));
+
+    if (filtered.length === 0) {
+        listEl.innerHTML = `<div class="noteslist-empty">No hay notas${listFilter ? ' que coincidan.' : '.'}</div>`;
+        return;
+    }
+
+    const html = filtered.map(it => {
+        const typeLabel = presetLabelFor(it.iconType);
+        const sub = it.body ? it.body.replace(/\s+/g, ' ').slice(0, 80) : '';
+        return `
+      <div class="noteslist-item" data-id="${it.id}" title="Ir a: ${escapeHtml(it.title)}">
+        <div>
+          <div class="noteslist-title">${escapeHtml(it.title)}</div>
+          ${sub ? `<div class="noteslist-sub">${escapeHtml(sub)}</div>` : ''}
+        </div>
+        <div class="noteslist-pill">${escapeHtml(typeLabel)}</div>
+      </div>
+    `;
+    }).join('');
+    listEl.innerHTML = html;
+}
+
+function openNote(id) {
+    const rec = noteMarkers[id];
+    if (!rec) return;
+    const { marker, data } = rec;
+    const ll = marker.getLatLng();
+    try { deactivateDrawingTools?.(); } catch { }
+    // acercar y abrir popup
+    map.closePopup();
+    map.flyTo(ll, Math.max(map.getZoom(), FLYTO_ZOOM), { animate: true, duration: 0.6 });
+    // abrir popup un tick después del movimiento (por si está fuera de vista aún)
+    setTimeout(() => {
+        marker.openPopup();
+    }, 650);
 }
 
 /** ================= Modo Nota ================= */
@@ -255,7 +437,7 @@ function onMapClickAddNote(e) {
         closeOnClick: false,
         autoClose: false,
         maxWidth: 360,
-        className: 'note-popup' // <-- clase para el CSS con scroll
+        className: 'note-popup'
     })
         .setLatLng(latlng)
         .setContent(createFormHtml())
@@ -385,7 +567,7 @@ function buildNoteDivHtml(data) {
         display: 'grid',
         placeItems: 'center',
         boxSizing: 'border-box',
-        overflow: 'visible'   // <- para que el label pueda salir del círculo
+        overflow: 'visible'   // label fuera del círculo
     });
 
     const inner = document.createElement('div');
@@ -514,6 +696,7 @@ function bindNotePopup(marker, id, data) {
                         rec.data = { ...rec.data, title, body };
                         rec.marker.setIcon(makeNoteIcon(rec.data));
                     }
+                    renderList(); // refrescar texto en panel si está abierto
                 } catch (err) {
                     console.error('[notes] update error:', err);
                     alert('No se pudo actualizar la nota. Revisá reglas de Firestore.');
@@ -552,9 +735,11 @@ function renderOrUpdateNote(id, data) {
         noteMarkers[id].marker.setIcon(makeNoteIcon(data));
         bindNotePopup(noteMarkers[id].marker, id, data);
     }
+
+    // si el panel está abierto, refrescamos
+    if (listOpen) renderList();
 }
 
-/** ================= Carga inicial + RT ================= */
 async function loadExistingNotesOnce() {
     try {
         const snap = await getNotesRef().get();
@@ -573,7 +758,11 @@ function startRealtime() {
                 if (ch.type === 'added' || ch.type === 'modified') {
                     renderOrUpdateNote(id, ch.doc.data());
                 } else if (ch.type === 'removed') {
-                    if (noteMarkers[id]) { map.removeLayer(noteMarkers[id].marker); delete noteMarkers[id]; }
+                    if (noteMarkers[id]) {
+                        map.removeLayer(noteMarkers[id].marker);
+                        delete noteMarkers[id];
+                    }
+                    if (listOpen) renderList();
                 }
             });
         }, (err) => {
@@ -619,6 +808,7 @@ function initNotes() {
     ensureNotesPane();
     ensureNotesCss();
     addControlOnce();
+    addListControlOnce();
     setupZoomLabelBehavior();
     loadExistingNotesOnce();
     startRealtime();
@@ -631,6 +821,7 @@ if (map && typeof map.whenReady === 'function') {
 }
 
 /** ================= Exports ================= */
-export function toggleNotes() { toggleNoteMode(); }
+export function toggleNotes() { noteMode ? disableNoteMode() : enableNoteMode(); }
 export function enableNotes() { enableNoteMode(); }
 export function disableNotes() { disableNoteMode(); }
+export function toggleNotesList() { toggleListPanel(); } // opcional

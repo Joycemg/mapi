@@ -75,51 +75,19 @@ map.on('contextmenu', async (e) => {
     showCoordsPopup(e.latlng, copied);
 });
 
-if ('ontouchstart' in window) {
-    map.doubleClickZoom?.disable();
-}
+if ('ontouchstart' in window) { map.doubleClickZoom?.disable(); }
+let lastTouchTs = 0;
+map.getContainer().addEventListener('touchend', async (ev) => {
+    const now = Date.now(); const dt = now - lastTouchTs;
+    const touch = ev.changedTouches && ev.changedTouches[0]; if (!touch) return;
 
-let lastTapTime = 0;
-let lastTapPos = null;
-let touchStartTime = 0;
-
-const container = map.getContainer();
-
-container.addEventListener('touchstart', (ev) => {
-    if (ev.touches.length === 1) {
-        touchStartTime = Date.now();
-    }
-}, { passive: true });
-
-container.addEventListener('touchend', async (ev) => {
-    if (ev.touches.length > 0 || ev.changedTouches.length !== 1) return;
-
-    const now = Date.now();
-    const touchDuration = now - touchStartTime;
-
-    // No permitir long press
-    if (touchDuration > 250) return;
-
-    const touch = ev.changedTouches[0];
-    const containerPoint = map.mouseEventToContainerPoint(touch);
-    const latlng = map.containerPointToLatLng(containerPoint);
-
-    const isNear = lastTapPos &&
-        Math.abs(containerPoint.x - lastTapPos.x) < 20 &&
-        Math.abs(containerPoint.y - lastTapPos.y) < 20;
-
-    const isDoubleTap = now - lastTapTime < 300 && isNear;
-
-    if (isDoubleTap) {
-        ev.preventDefault();
-        ev.stopPropagation();
+    if (dt > 0 && dt < 300) {
+        const containerPoint = map.mouseEventToContainerPoint(touch);
+        const latlng = map.containerPointToLatLng(containerPoint);
         const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
-        const copied = await copyToClipboard(text);
+        let copied = false; try { copied = await copyToClipboard(text); } catch { }
         showCoordsPopup(latlng, copied);
-        lastTapTime = 0;
-        lastTapPos = null;
-    } else {
-        lastTapTime = now;
-        lastTapPos = containerPoint;
+        ev.preventDefault(); ev.stopPropagation();
     }
+    lastTouchTs = now;
 }, { passive: false });

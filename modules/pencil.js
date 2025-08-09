@@ -34,14 +34,14 @@ const setStyles = (el, styles) => Object.assign(el.style, styles);
 const chipBase = {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    padding: '6px 8px',
+    gap: '1px',
+    padding: '1px 2px',
     cursor: 'pointer',
     borderRadius: '8px',
     userSelect: 'none',
     border: '1px solid #e5e7eb',
     background: '#fafafa',
-    minHeight: '36px'
+    minHeight: '15px'
 };
 
 const markSelected = (btn, group) => {
@@ -50,11 +50,13 @@ const markSelected = (btn, group) => {
         c.style.background = '#fafafa';
         c.style.borderColor = '#e5e7eb';
         c.style.boxShadow = 'none';
+        c.style.outline = 'none';
     });
     btn.classList.add('selected');
     btn.style.background = '#eef4ff';
     btn.style.borderColor = '#bdd0ff';
     btn.style.boxShadow = '0 0 0 1px #bdd0ff inset';
+    btn.style.outline = '2px solid #2563eb';
 };
 
 const makeChip = (parent) => {
@@ -119,8 +121,9 @@ const PencilControl = L.Control.extend({
         configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
         setStyles(configPanel, {
             position: 'absolute',
-            top: '100%',
-            left: '0',
+            top: '0',        // 👈 alinear arriba con el botón
+            left: '100%',    // 👈 desplazar a la derecha del botón
+            marginLeft: '6px', // 👈 pequeña separación para que no se pegue
             display: 'none',
             background: '#fff',
             border: '1px solid #d1d5db',
@@ -128,34 +131,56 @@ const PencilControl = L.Control.extend({
             boxShadow: '0 8px 20px rgba(0,0,0,.16)',
             zIndex: '2000',
             minWidth: '200px',
-            padding: '8px'
+            padding: '6px'
         });
         L.DomEvent.disableClickPropagation(configPanel);
         L.DomEvent.disableScrollPropagation(configPanel);
         L.DomEvent.on(configPanel, 'pointerdown', (e) => e.stopPropagation());
         L.DomEvent.on(configPanel, 'touchstart', (e) => e.stopPropagation());
 
-        // Grid
-        const grid = L.DomUtil.create('div', 'pencil-grid', configPanel);
-        setStyles(grid, {
+        /* ======= Header compacto con botón cerrar ======= */
+        const header = L.DomUtil.create('div', 'pencil-header', configPanel);
+        setStyles(header, {
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: '8px', padding: '2px 2px 6px 2px'
+        });
+        const title = L.DomUtil.create('div', '', header);
+        title.textContent = 'Lápiz';
+        setStyles(title, { font: '600 12px/1.2 system-ui, sans-serif', color: '#111827' });
+
+        const closeBtn = L.DomUtil.create('button', 'pencil-close', header);
+        closeBtn.type = 'button';
+        closeBtn.innerHTML = '✕';
+        setStyles(closeBtn, {
+            border: '1px solid #e5e7eb', borderRadius: '6px',
+            background: '#fff', cursor: 'pointer',
+            width: '24px', height: '22px', lineHeight: '20px', padding: '0',
+            font: '600 12px/1 system-ui, sans-serif'
+        });
+        L.DomEvent.on(closeBtn, 'click', (e) => { e.preventDefault(); toggleUI(false); });
+
+        /* ======= Controles compactos ======= */
+        const toolbar = L.DomUtil.create('div', 'pencil-toolbar', configPanel);
+        setStyles(toolbar, {
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: '8px 12px',
-            alignItems: 'start'
+            gridTemplateColumns: 'auto 1fr',
+            gap: '6px 10px',
+            alignItems: 'center'
         });
 
-        const colorWrap = L.DomUtil.create('div', 'pencil-section-colors', grid);
-        colorWrap.innerHTML = `<div style="font:600 11px/1.1 system-ui, sans-serif;margin:0 0 6px;">Color</div>`;
-        colorWrap.append(makeColorSelector());
+        const colorLabel = L.DomUtil.create('div', '', toolbar);
+        colorLabel.textContent = '🎨';
+        setStyles(colorLabel, { fontSize: '14px', textAlign: 'center', width: '18px' });
+        toolbar.append(makeColorSelector(true));  // compacto
 
-        const weightWrap = L.DomUtil.create('div', 'pencil-section-weights', grid);
-        weightWrap.innerHTML = `<div style="font:600 11px/1.1 system-ui, sans-serif;margin:0 0 6px;">Grosor</div>`;
-        weightWrap.append(makeWeightSelector());
+        const weightLabel = L.DomUtil.create('div', '', toolbar);
+        weightLabel.textContent = '📏';
+        setStyles(weightLabel, { fontSize: '14px', textAlign: 'center', width: '18px' });
+        toolbar.append(makeWeightSelector(true)); // compacto
 
         const applyResponsive = () => {
             const oneCol = window.innerWidth < 360;
-            grid.style.gridTemplateColumns = oneCol ? '1fr' : '1fr 1fr';
-            configPanel.style.minWidth = oneCol ? '180px' : '200px';
+            configPanel.style.minWidth = oneCol ? '23px' : '23px';
         };
         applyResponsive();
         window.addEventListener('resize', applyResponsive);
@@ -194,77 +219,145 @@ function guardBtn(el) {
 }
 
 /* =========================
-   Selectores
+   Selectores (compactos)
 ========================= */
-function makeColorSelector() {
-    const s = L.DomUtil.create('div', 'color-selector');
-    setStyles(s, { display: 'flex', flexDirection: 'column', gap: '6px' });
+function makeColorSelector(/* compacto = false (ya no lo necesitamos) */) {
+    const wrap = L.DomUtil.create('div', 'color-selector');
+    // Grid: 2 por fila
+    setStyles(wrap, {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, auto)',
+        columnGap: '10px',
+        rowGap: '8px',
+        alignItems: 'center',
+        justifyItems: 'start'
+    });
 
     const colors = ['black', 'white', '#e11d48', '#10b981'];
 
+    const mark = (btn) => {
+        [...wrap.children].forEach(el => {
+            el.style.outline = 'none';
+            el.style.boxShadow = 'none';
+            el.style.borderColor = '#d1d5db';
+        });
+        btn.style.outline = '2px solid #2563eb';
+        btn.style.boxShadow = '0 0 0 2px rgba(37,99,235,.25)';
+        btn.style.borderColor = '#2563eb';
+    };
+
     colors.forEach((name) => {
-        const btn = makeChip(s);
-        btn.className = `chip color-chip`;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'color-chip';
+        btn.dataset.color = name;
         btn.title = `Color ${name}`;
         btn.setAttribute('aria-label', `Color ${name}`);
 
-        const svg = svgEl('svg', { width: 22, height: 22, viewBox: '0 0 22 22', style: 'margin:auto' });
-        const circle = svgEl('circle', {
-            cx: 11, cy: 11, r: 9,
-            fill: name,
-            stroke: (name === 'white' ? '#9ca3af' : 'none'),
-            'stroke-width': 1
+        const size = 15;
+        setStyles(btn, {
+            width: `${size}px`,
+            height: `${size}px`,
+            borderRadius: '50%',
+            border: `1px solid #d1d5db`,
+            background: name,
+            cursor: 'pointer',
+            display: 'inline-block'
         });
-        svg.appendChild(circle);
-        btn.append(svg);
+        if (name === 'white') btn.style.boxShadow = 'inset 0 0 0 1px #9ca3af';
 
-        if (selectedColor === name) markSelected(btn, s);
+        wrap.append(btn);
+
+        if (selectedColor === name) mark(btn);
 
         btn.onclick = () => {
             selectedColor = name;
-            markSelected(btn, s);
+            mark(btn);
             updatePencilPreview();
-            s.parentElement?.parentElement
+            // actualizar previews de peso
+            wrap.parentElement?.parentElement
                 ?.querySelectorAll('.weight-chip svg line')
                 .forEach(line => line.setAttribute('stroke', selectedColor));
         };
+
+        L.DomEvent.on(btn, 'pointerdown', (e) => e.stopPropagation());
+        L.DomEvent.on(btn, 'touchstart', (e) => e.stopPropagation());
     });
 
-    return s;
+    return wrap;
 }
-
-function makeWeightSelector() {
-    const s = L.DomUtil.create('div', 'weight-selector');
-    setStyles(s, { display: 'flex', flexDirection: 'column', gap: '6px' });
+function makeWeightSelector(/* compacto = false (ya no lo necesitamos) */) {
+    const wrap = L.DomUtil.create('div', 'weight-selector');
+    // Grid: 2 por fila
+    setStyles(wrap, {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, auto)',
+        columnGap: '10px',
+        rowGap: '8px',
+        alignItems: 'center',
+        justifyItems: 'start'
+    });
 
     const options = [2, 4, 6, 10];
 
     options.forEach((w) => {
-        const btn = makeChip(s);
+        const btn = makeChip(wrap);
         btn.className = 'chip weight-chip';
         btn.title = `Grosor ${w}px`;
         btn.setAttribute('aria-label', `Grosor ${w}px`);
 
-        const svg = svgEl('svg', { width: 60, height: 18, viewBox: '0 0 60 18', style: 'margin:auto' });
+        // Compacto y pareja visual con 2 por fila
+        setStyles(btn, {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '0 4px',
+            borderRadius: '8px',
+            border: '1px solid #e5e7eb',
+            background: '#fafafa',
+            minHeight: '15px',
+            height: '15px'
+        });
+
+        const width = 20;
+        const height = 18;
+
+        const svg = svgEl('svg', { width, height, viewBox: `0 0 ${width} ${height}` });
         const line = svgEl('line', {
-            x1: 6, y1: 9, x2: 54, y2: 9,
+            x1: 6, y1: height / 2, x2: width - 6, y2: height / 2,
             stroke: selectedColor,
             'stroke-width': String(w),
             'stroke-linecap': 'round'
         });
         svg.appendChild(line);
+        btn.innerHTML = '';
         btn.append(svg);
 
-        if (selectedWeight === w) markSelected(btn, s);
+        const selectBtn = () => {
+            [...wrap.children].forEach(c => {
+                c.classList.remove('selected');
+                c.style.background = '#fafafa';
+                c.style.borderColor = '#e5e7eb';
+                c.style.boxShadow = 'none';
+                c.style.outline = 'none';
+            });
+            btn.classList.add('selected');
+            btn.style.background = '#eef4ff';
+            btn.style.borderColor = '#bdd0ff';
+            btn.style.boxShadow = '0 0 0 1px #bdd0ff inset';
+            btn.style.outline = '2px solid #2563eb';
+        };
+
+        if (selectedWeight === w) selectBtn();
 
         btn.onclick = () => {
             selectedWeight = w;
-            markSelected(btn, s);
+            selectBtn();
             updatePencilPreview();
         };
     });
 
-    return s;
+    return wrap;
 }
 
 function svgEl(tag, attrs) {
@@ -672,3 +765,24 @@ function distPointToSegment(P, A, B) {
     const projY = A.y + t * vy;
     return Math.hypot(P.x - projX, P.y - projY);
 }
+
+(function ensurePencilCss() {
+    const id = 'pencil-active-style';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.textContent = `
+    .pencil-wrapper a.active{
+      background:#2563eb!important;
+      color:#fff!important;
+      box-shadow:0 0 0 2px rgba(37,99,235,.25);
+    }
+    /* Si querés que la goma se vea distinta al lápiz */
+    .pencil-wrapper .custom-eraser.active{
+      background:#ef4444!important;
+      color:#fff!important;
+      box-shadow:0 0 0 2px rgba(239,68,68,.25);
+    }
+  `;
+    document.head.appendChild(style);
+})();
