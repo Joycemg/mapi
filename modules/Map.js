@@ -50,7 +50,7 @@ if (!map) {
 
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         ...baseOptions,
-        attribution: '&copy; OpenStreetMap contributors'
+        attribution: '&copy; OpenStreetMap contributors', maxZoom: 18
     });
 
     const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -190,5 +190,6 @@ if (!map) {
 }
 
 export { map };
+
 
 
