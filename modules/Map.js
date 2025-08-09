@@ -14,7 +14,7 @@ if (!map) {
         center: DEFAULT_CENTER,
         zoom: DEFAULT_ZOOM,
         minZoom: DEFAULT_ZOOM, // no alejar más que la vista mundial
-        maxZoom: 19,           // acercar a nivel ciudad
+        maxZoom: 18,           // acercar a nivel ciudad
         zoomControl: true,
         attributionControl: false,
 
@@ -22,7 +22,7 @@ if (!map) {
         preferCanvas: true,
         inertia: false,
         wheelDebounceTime: 40,
-        wheelPxPerZoomLevel: 100,
+        wheelPxPerZoomLevel: 90,
 
         // Límites y no-wrap
         worldCopyJump: false,
@@ -50,13 +50,13 @@ if (!map) {
 
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         ...baseOptions,
-        attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+        attribution: '&copy; OpenStreetMap contributors', maxZoom: 18
     });
 
     const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         ...baseOptions,
         subdomains: 'abcd',
-        maxZoom: 19,
+        maxZoom: 18,
         attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
     });
 
@@ -190,6 +190,7 @@ if (!map) {
 }
 
 export { map };
+
 
 
 
