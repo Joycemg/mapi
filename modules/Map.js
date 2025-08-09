@@ -10,7 +10,7 @@ if (!map) {
     const WORLD_BOUNDS = L.latLngBounds(L.latLng(-85, -180), L.latLng(85, 180));
     const DEFAULT_CENTER = [20, 0];
     const DEFAULT_ZOOM = 3;
-    const MAX_ZOOM = 17; // tope requerido
+    const MAX_ZOOM = 18; // tope requerido
 
     const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
