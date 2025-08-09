@@ -24,6 +24,9 @@ if (!map) {
         wheelDebounceTime: 40,
         wheelPxPerZoomLevel: 90,
 
+        updateWhenZooming: true,  // clave para que las tiles se actualicen al hacer zoom
+        zoomAnimation: false,     // evita bugs de animación
+
         worldCopyJump: false,
         maxBounds: WORLD_BOUNDS,
         maxBoundsViscosity: 0.85,
@@ -33,11 +36,16 @@ if (!map) {
         touchZoom: true
     });
 
-    // Evitar zoom por encima de 17
+    // Forzar recarga de tiles y limitar zoom máximo a 17
     map.on('zoomend', () => {
         if (map.getZoom() > 17) {
             map.setZoom(17);
         }
+        map.eachLayer(layer => {
+            if (layer instanceof L.TileLayer) {
+                layer.redraw();
+            }
+        });
     });
 
     const baseOptions = {
@@ -189,3 +197,4 @@ if (!map) {
 }
 
 export { map };
+                    
