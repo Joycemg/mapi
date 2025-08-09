@@ -45,21 +45,19 @@ if (!map) {
         updateWhenIdle: true,
         updateWhenZooming: false,
         keepBuffer: 1,
-        className: 'filtered-tile',
-        maxNativeZoom: 17
+        className: 'filtered-tile'
         
     };
 
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         ...baseOptions,
-        attribution: '&copy; OpenStreetMap contributors', maxZoom: 17
+        attribution: '&copy; OpenStreetMap contributors';
     });
 
     const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         ...baseOptions,
         subdomains: 'abcd',
-        maxZoom: 17,
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO';
     });
 
     let currentBase = null;
@@ -192,6 +190,7 @@ if (!map) {
 }
 
 export { map };
+
 
 
 
