@@ -13,37 +13,33 @@ if (!map) {
         center: DEFAULT_CENTER,
         zoom: DEFAULT_ZOOM,
         minZoom: DEFAULT_ZOOM,
-        maxZoom: 18,            // zoom máximo a nivel calle
-        zoomSnap: 1,            // solo zoom entero (sin fracciones)
-        zoomDelta: 1,           // pasos de zoom enteros
+        maxZoom: 17,            // zoom máximo nivel ciudad (17)
+        zoomSnap: 1,
+        zoomDelta: 1,
         zoomControl: true,
         attributionControl: false,
 
-        // === Performance / UX ===
         preferCanvas: true,
         inertia: false,
         wheelDebounceTime: 40,
         wheelPxPerZoomLevel: 90,
 
-        // Límites y no-wrap
         worldCopyJump: false,
         maxBounds: WORLD_BOUNDS,
         maxBoundsViscosity: 0.85,
 
-        // Móvil
         tap: true,
         tapTolerance: 22,
         touchZoom: true
     });
 
-    // Bloquear zoom mayor a 18 al soltar la rueda o hacer zoom manual
+    // Evitar zoom por encima de 17
     map.on('zoomend', () => {
-        if (map.getZoom() > 18) {
-            map.setZoom(18);
+        if (map.getZoom() > 17) {
+            map.setZoom(17);
         }
     });
 
-    // ====== Capas base (OSM principal + Carto fallback) ======
     const baseOptions = {
         noWrap: true,
         continuousWorld: false,
@@ -57,16 +53,16 @@ if (!map) {
 
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         ...baseOptions,
-        maxZoom: 18,
-        maxNativeZoom: 18,
+        maxZoom: 17,
+        maxNativeZoom: 17,
         attribution: '&copy; OpenStreetMap contributors'
     });
 
     const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         ...baseOptions,
         subdomains: 'abcd',
-        maxZoom: 18,
-        maxNativeZoom: 18,
+        maxZoom: 17,
+        maxNativeZoom: 17,
         attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
     });
 
@@ -123,13 +119,10 @@ if (!map) {
 
     osm.on('load', () => stopRetryOSM());
 
-    // Arrancamos con OSM
     useBase(osm);
 
-    // ====== Barra de escala ======
     L.control.scale({ imperial: false }).addTo(map);
 
-    // ====== Botón: Reset a vista mundial ======
     const ResetView = L.Control.extend({
         options: { position: 'topleft' },
         onAdd() {
@@ -150,10 +143,8 @@ if (!map) {
     });
     map.addControl(new ResetView());
 
-    // Mantener dentro de los límites al cambiar tamaño
     map.on('resize', () => map.panInsideBounds(WORLD_BOUNDS, { animate: false }));
 
-    // ====== Afinado móvil ======
     (function mobileTuning() {
         const css = document.createElement('style');
         css.textContent = `
@@ -164,7 +155,6 @@ if (!map) {
         map.getContainer().addEventListener('contextmenu', (e) => e.preventDefault());
     })();
 
-    // ====== Prefetch suave de tiles ======
     const PREFETCH_PAD_PX = 256;
 
     function prefetchTiles(padPx = PREFETCH_PAD_PX) {
