@@ -17,7 +17,7 @@ if (!map) {
         maxZoom: 18,           // acercar a nivel ciudad
         zoomControl: true,
         attributionControl: false,
-        maxNativeZoom: 18
+        maxNativeZoom: 17
 
         // === Performance / UX ===
         preferCanvas: true,
@@ -193,6 +193,7 @@ if (!map) {
 }
 
 export { map };
+
 
 
 
