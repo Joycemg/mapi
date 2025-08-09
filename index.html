@@ -9,25 +9,71 @@
 
         <!-- Leaflet + plugins -->
         <link rel="stylesheet"
-              href="https://unpkg.com/leaflet/dist/leaflet.css" />
+              href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <link rel="stylesheet"
-              href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+              href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
         <link rel="stylesheet"
-              href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+              href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
+        <link rel="stylesheet"
+              href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+        <link rel="stylesheet"
+              href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+
+        <!-- MapLibre GL (vector tiles) -->
+        <link rel="stylesheet"
+              href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" />
+        <script src="https://unpkg.com/openmaptiles-language@1.1.0/dist/openmaptiles-language.js"></script>
+
+        <!-- Tus estilos -->
         <link rel="stylesheet"
               href="styles.css" />
 
-        <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-        <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
-        <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+        <!-- Scripts base Leaflet -->
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+        <script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.js"></script>
+        <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+        <!-- MapLibre GL -->
+        <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+        <!-- Puente Leaflet ↔ MapLibre -->
+        <script src="https://unpkg.com/maplibre-gl-leaflet/leaflet-maplibre-gl.js"></script>
+        <!-- OpenMapTiles Language (para forzar name:es) -->
+        <script src="https://unpkg.com/openmaptiles-language@1.1.0/dist/openmaptiles-language.js"></script>
 
         <!-- Firebase compat (v9+) -->
         <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
         <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+        <!-- Sugerencia rápida por si styles.css no define #map -->
+        <style>
+                /* Eliminá esto si ya lo tenés en styles.css */
+                html,
+                body {
+                        height: 100%;
+                        margin: 0;
+                }
+
+                #map {
+                        width: 100%;
+                        height: 100vh;
+                }
+
+                .panel {
+                        position: fixed;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                }
+        </style>
 </head>
 
 <body>
-        <div id="map"></div>
+        <noscript>Necesitas habilitar JavaScript para ver el mapa.</noscript>
+
+        <div id="map"
+             role="application"
+             aria-label="Mapa principal"></div>
 
         <!-- Panel inferior -->
         <div id="panel"
@@ -51,6 +97,7 @@
                 src="./config/firebase.js"></script>
 
         <!-- Módulos (orden recomendado) -->
+        <!-- Map.js depende de Leaflet, MapLibre y openmaptiles-language ya cargados arriba -->
         <script type="module"
                 src="./modules/Map.js"></script>
         <script type="module"
