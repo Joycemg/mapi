@@ -1,4 +1,3 @@
-// modules/Map.js
 let map = window.__APP_MAP__;
 
 if (!map) {
@@ -13,8 +12,8 @@ if (!map) {
     map = L.map('map', {
         center: DEFAULT_CENTER,
         zoom: DEFAULT_ZOOM,
-        minZoom: DEFAULT_ZOOM, // no alejar más que la vista mundial
-        maxZoom: 17,           // acercar a nivel ciudad
+        minZoom: DEFAULT_ZOOM,
+        maxZoom: 18, // nivel calle (tope)
         zoomControl: true,
         attributionControl: false,
 
@@ -27,7 +26,7 @@ if (!map) {
         // Límites y no-wrap
         worldCopyJump: false,
         maxBounds: WORLD_BOUNDS,
-        maxBoundsViscosity: 0.85, // rebote más "amable"
+        maxBoundsViscosity: 0.85,
 
         // Móvil
         tap: true,
@@ -40,30 +39,32 @@ if (!map) {
         noWrap: true,
         continuousWorld: false,
         detectRetina: true,
-        crossOrigin: 'anonymous', // por si después capturás el mapa
-        // Carga progresiva / perf
+        crossOrigin: 'anonymous',
         updateWhenIdle: true,
         updateWhenZooming: false,
         keepBuffer: 1,
         className: 'filtered-tile'
-        
     };
 
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         ...baseOptions,
-        attribution: '&copy; OpenStreetMap contributors';
+        maxZoom: 18,
+        maxNativeZoom: 18,
+        attribution: '&copy; OpenStreetMap contributors'
     });
 
     const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         ...baseOptions,
         subdomains: 'abcd',
-        attribution: '&copy; OpenStreetMap contributors &copy; CARTO';
+        maxZoom: 18,
+        maxNativeZoom: 18,
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
     });
 
     let currentBase = null;
     let retryTimer = null;
-    const RETRY_MS = 30000;       // cada 30s intenta volver a OSM
-    const PROBE_TIMEOUT_MS = 10000; // timeout del intento de restauración
+    const RETRY_MS = 30000;
+    const PROBE_TIMEOUT_MS = 10000;
 
     function useBase(layer) {
         if (currentBase === layer) return;
@@ -87,34 +88,26 @@ if (!map) {
             useBase(osm);
             if (map.hasLayer(carto)) map.removeLayer(carto);
             stopRetryOSM();
-            // console.info('[map] OSM restaurado.');
         };
         osm.once('load', onLoad);
 
-        // Si no está en el mapa, lo agregamos para “probar” carga
         if (!map.hasLayer(osm)) osm.addTo(map);
 
-        // Si no cargó en X ms, seguimos con fallback y probamos más tarde
         setTimeout(() => {
             if (!loaded) {
                 osm.off('load', onLoad);
                 if (currentBase !== carto && map.hasLayer(carto)) useBase(carto);
-                // Podrías quitar OSM para ahorrar, pero dejarlo no molesta.
-                // map.removeLayer(osm);
             }
         }, PROBE_TIMEOUT_MS);
     }
 
-    // Si OSM falla en alguna tile, pasamos a Carto y arrancamos reintentos
     osm.on('tileerror', () => {
         if (currentBase !== carto) {
             useBase(carto);
-            // console.warn('[map] OSM no disponible, usando Carto fallback.');
         }
         startRetryOSM();
     });
 
-    // Si OSM carga bien, cortamos reintentos
     osm.on('load', () => stopRetryOSM());
 
     // Arrancamos con OSM
@@ -144,7 +137,7 @@ if (!map) {
     // Mantener dentro de los límites al cambiar tamaño
     map.on('resize', () => map.panInsideBounds(WORLD_BOUNDS, { animate: false }));
 
-    // ====== Afinado móvil: evitar long-press/callout/selección ======
+    // ====== Afinado móvil ======
     (function mobileTuning() {
         const css = document.createElement('style');
         css.textContent = `
@@ -155,8 +148,8 @@ if (!map) {
         map.getContainer().addEventListener('contextmenu', (e) => e.preventDefault());
     })();
 
-    // ====== Prefetch suave de tiles alrededor del viewport ======
-    const PREFETCH_PAD_PX = 256; // ≈ 1 tile extra alrededor
+    // ====== Prefetch suave de tiles ======
+    const PREFETCH_PAD_PX = 256;
 
     function prefetchTiles(padPx = PREFETCH_PAD_PX) {
         try {
@@ -171,7 +164,6 @@ if (!map) {
                 if (!map.hasLayer(layer)) return;
                 if (typeof layer._update !== 'function' || typeof layer._getTiledPixelBounds !== 'function') return;
 
-                // Monkey-patch temporal de los bounds de tiles
                 const orig = layer._getTiledPixelBounds;
                 layer._getTiledPixelBounds = () => padded;
                 try { layer._update(); } finally {
@@ -179,23 +171,13 @@ if (!map) {
                 }
             });
         } catch {
-            // best-effort: cualquier error se ignora silenciosamente
+            // ignorar errores
         }
     }
 
-    // Prefetch cuando el usuario "termina" pan/zoom
     map.on('moveend zoomend', () => prefetchTiles());
 
     window.__APP_MAP__ = map;
 }
 
 export { map };
-
-
-
-
-
-
-
-
-
