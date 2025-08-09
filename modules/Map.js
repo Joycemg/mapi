@@ -13,7 +13,9 @@ if (!map) {
         center: DEFAULT_CENTER,
         zoom: DEFAULT_ZOOM,
         minZoom: DEFAULT_ZOOM,
-        maxZoom: 18, // nivel calle (tope)
+        maxZoom: 18,            // zoom máximo a nivel calle
+        zoomSnap: 1,            // solo zoom entero (sin fracciones)
+        zoomDelta: 1,           // pasos de zoom enteros
         zoomControl: true,
         attributionControl: false,
 
@@ -32,6 +34,13 @@ if (!map) {
         tap: true,
         tapTolerance: 22,
         touchZoom: true
+    });
+
+    // Bloquear zoom mayor a 18 al soltar la rueda o hacer zoom manual
+    map.on('zoomend', () => {
+        if (map.getZoom() > 18) {
+            map.setZoom(18);
+        }
     });
 
     // ====== Capas base (OSM principal + Carto fallback) ======
@@ -76,8 +85,12 @@ if (!map) {
     function startRetryOSM() {
         if (!retryTimer) retryTimer = setInterval(tryRestoreOSM, RETRY_MS);
     }
+
     function stopRetryOSM() {
-        if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+        if (retryTimer) {
+            clearInterval(retryTimer);
+            retryTimer = null;
+        }
     }
 
     function tryRestoreOSM() {
@@ -126,7 +139,10 @@ if (!map) {
             a.title = 'Vista mundial';
             a.setAttribute('aria-label', 'Vista mundial');
             a.textContent = '🌐';
-            a.onclick = (e) => { e.preventDefault(); map.setView(DEFAULT_CENTER, DEFAULT_ZOOM); };
+            a.onclick = (e) => {
+                e.preventDefault();
+                map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+            };
             L.DomEvent.disableClickPropagation(box);
             L.DomEvent.disableScrollPropagation(box);
             return box;
@@ -141,9 +157,9 @@ if (!map) {
     (function mobileTuning() {
         const css = document.createElement('style');
         css.textContent = `
-      #map { -webkit-touch-callout: none; touch-action: pan-x pan-y; }
-      .leaflet-bar, .leaflet-control { user-select: none; -webkit-user-select: none; }
-    `;
+            #map { -webkit-touch-callout: none; touch-action: pan-x pan-y; }
+            .leaflet-bar, .leaflet-control { user-select: none; -webkit-user-select: none; }
+        `;
         document.head.appendChild(css);
         map.getContainer().addEventListener('contextmenu', (e) => e.preventDefault());
     })();
@@ -166,7 +182,9 @@ if (!map) {
 
                 const orig = layer._getTiledPixelBounds;
                 layer._getTiledPixelBounds = () => padded;
-                try { layer._update(); } finally {
+                try {
+                    layer._update();
+                } finally {
                     layer._getTiledPixelBounds = orig;
                 }
             });
