@@ -56,7 +56,7 @@ if (!map) {
     const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         ...baseOptions,
         subdomains: 'abcd',
-        maxZoom: 20,
+        maxZoom: 18,
         attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
     });
 
@@ -190,3 +190,4 @@ if (!map) {
 }
 
 export { map };
+
