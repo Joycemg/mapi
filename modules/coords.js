@@ -18,10 +18,20 @@ async function copyToClipboard(text) {
   return ok;
 }
 
-function showCoordsPopup(latlng, copiedNow = false) {
-  const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
+/* ========== Popup reutilizable ========== */
+const IS_TOUCH = 'ontouchstart' in window;
+const POPUP_OFFSET_Y = IS_TOUCH ? -28 : -16; // anclar un poco arriba (más en móvil)
 
-  const html = `
+let coordsPopup = L.popup({
+  autoClose: true,
+  closeOnClick: true,
+  keepInView: true,
+  offset: [0, POPUP_OFFSET_Y],  // << anclado hacia arriba
+  maxWidth: 260
+});
+
+function buildPopupHtml(text, copiedNow = false) {
+  return `
     <div style="font:12px/1.35 sans-serif; min-width:180px">
       <input id="coords-input" value="${text}" readonly
         style="width:100%;box-sizing:border-box;padding:6px 8px;font:inherit;">
@@ -35,20 +45,30 @@ function showCoordsPopup(latlng, copiedNow = false) {
       </div>
     </div>
   `;
+}
 
-  const popup = L.popup({ autoClose: true, closeOnClick: true })
-    .setLatLng(latlng).setContent(html).openOn(map);
+function showCoordsPopup(latlng, copiedNow = false) {
+  const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
+
+  coordsPopup
+    .setLatLng(latlng)
+    .setContent(buildPopupHtml(text, copiedNow))
+    .openOn(map);
 
   map.once('popupopen', (e) => {
-    if (e.popup !== popup) return;
+    if (e.popup !== coordsPopup) return;
     const root = e.popup.getElement?.(); if (!root) return;
     const inp = root.querySelector('#coords-input');
     if (inp) { inp.focus(); inp.select(); inp.setSelectionRange(0, inp.value.length); }
   });
 }
 
+/* ========== Eventos del popup (delegados) ========== */
 document.addEventListener('click', async (ev) => {
   const t = ev.target; if (!(t instanceof HTMLElement)) return;
+
+  // Solo si el click vino desde un popup Leaflet
+  if (!t.closest('.leaflet-popup')) return;
 
   if (t.id === 'copy-coords') {
     ev.preventDefault(); ev.stopPropagation();
@@ -68,6 +88,7 @@ document.addEventListener('click', async (ev) => {
   }
 }, { passive: false });
 
+/* ========== Mostrar popup con click derecho ========== */
 map.getContainer().addEventListener('contextmenu', (ev) => ev.preventDefault());
 map.on('contextmenu', async (e) => {
   const text = `${fmt(e.latlng.lat)}, ${fmt(e.latlng.lng)}`;
@@ -75,8 +96,13 @@ map.on('contextmenu', async (e) => {
   showCoordsPopup(e.latlng, copied);
 });
 
-// ===== Mobile: doble pulsación con 1 dedo =====
-if ('ontouchstart' in window) { map.doubleClickZoom?.disable(); }
+/* ========== Cerrar popup al mover el mapa ========== */
+map.on('movestart zoomstart dragstart', () => {
+  if (map.hasLayer(coordsPopup)) map.closePopup(coordsPopup);
+});
+
+/* ========== Mobile: doble pulsación con 1 dedo ========== */
+if (IS_TOUCH) { map.doubleClickZoom?.disable(); }
 
 let lastTapTime = 0;
 let lastTapPoint = null;
@@ -98,10 +124,7 @@ function isOverUiClientXY(x, y) {
 
 // Detectar pinza (más de 1 dedo activo)
 map.getContainer().addEventListener('touchstart', (ev) => {
-  if (ev.touches.length > 1) {
-    multiTouch = true;
-    pinching = true;
-  }
+  if (ev.touches.length > 1) { multiTouch = true; pinching = true; }
 }, { passive: true });
 
 map.getContainer().addEventListener('touchmove', (ev) => {
@@ -110,7 +133,6 @@ map.getContainer().addEventListener('touchmove', (ev) => {
 
 map.getContainer().addEventListener('touchend', (ev) => {
   if (ev.touches.length === 0) {
-    // cuando no quedan dedos, reseteamos pinching en el próximo tick
     setTimeout(() => { pinching = false; multiTouch = false; }, 0);
   }
 }, { passive: true });
@@ -133,22 +155,17 @@ map.getContainer().addEventListener('touchmove', (ev) => {
 }, { passive: true });
 
 map.getContainer().addEventListener('touchend', async (ev) => {
-  // Rechazar si hubo multi-touch/pinch o si no hay touch para medir
   const touch = ev.changedTouches && ev.changedTouches[0];
   if (!touch) return;
   if (pinching || multiTouch) return;
-
-  // No sobre UI
   if (isOverUiClientXY(touch.clientX, touch.clientY)) return;
 
-  // Solo considerar si casi no se movió y fue un tap corto
   const tapDuration = Date.now() - startedAt;
   if (moved || tapDuration > 250) { startPoint = null; return; }
 
   const now = Date.now();
   const p = map.mouseEventToContainerPoint(touch);
 
-  // ¿doble tap dentro de ventana y cerca del punto anterior?
   const isDouble =
     (now - lastTapTime) <= MAX_DT_MS &&
     lastTapPoint &&
@@ -162,7 +179,6 @@ map.getContainer().addEventListener('touchend', async (ev) => {
     showCoordsPopup(latlng, copied);
     ev.preventDefault();
     ev.stopPropagation();
-    // reset para evitar triple tap encadenado
     lastTapTime = 0;
     lastTapPoint = null;
   } else {
@@ -170,6 +186,5 @@ map.getContainer().addEventListener('touchend', async (ev) => {
     lastTapPoint = p;
   }
 
-  // reset de estado de este gesto
   startPoint = null;
 }, { passive: false });
