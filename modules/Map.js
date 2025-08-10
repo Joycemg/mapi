@@ -2,7 +2,7 @@
 // Leaflet + capa base única: CARTO Positron.
 // Móvil: límites de zoom, pellizco centrado, resize/orientación robusto,
 // interacción táctil ajustada, prefetch pausado fuera de vista, aware de conexión
-// y pantalla completa nativa.
+// y pantalla completa nativa + MODO PINCH-ZOOM DEL NAVEGADOR cuando se alcanza MAX_ZOOM.
 
 let map = window.__APP_MAP__ || null;
 export { map };
@@ -27,7 +27,7 @@ export { map };
     const WORLD_BOUNDS = L.latLngBounds(L.latLng(-85, -180), L.latLng(85, 180));
     const DEFAULT_CENTER = [20, 0];
     const DEFAULT_ZOOM = tinyScreen ? 2 : 3;
-    // Límite de zoom móvil (más conservador)
+    // Límite de zoom móvil (más conservador). Cuando llegamos acá, habilitamos pinch-zoom del navegador.
     const MAX_ZOOM = isMobileUA ? 19 : 18;
 
     // Prefetch pad adaptado por dispositivo
@@ -55,12 +55,12 @@ export { map };
         preferCanvas: true,
 
         // Interacción
-        inertia: isMobileUA,                    // inercia suave en móvil
+        inertia: isMobileUA,
         inertiaDeceleration: 3000,
         tap: true,
         tapTolerance: 22,
-        touchZoom: 'center',                    // pan centrado al hacer zoom con pellizco
-        doubleClickZoom: false,                 // reservamos doble tap para coords
+        touchZoom: 'center',        // pellizco centrado (cuando Leaflet tiene el control)
+        doubleClickZoom: false,     // reservamos doble tap para coords
 
         // Animaciones
         zoomAnimation: !prefersReducedMotion && !isMobileUA,
@@ -76,7 +76,7 @@ export { map };
         wheelPxPerZoomLevel: 120
     });
 
-    // Ajuste táctil para evitar zoom por doble tap del navegador y scroll raro
+    // Por defecto: gestos del mapa activos pero sin zoom por doble tap del navegador
     map.getContainer().style.touchAction = 'manipulation';
 
     // Atribuciones
@@ -85,14 +85,13 @@ export { map };
     /* ===== Opciones comunes raster (aware de conexión) ===== */
     const rasterOptions = {
         noWrap: true,
-        detectRetina: !isMobileUA && !SAVE_DATA,   // desactiva retina si ahorro de datos
+        detectRetina: !isMobileUA && !SAVE_DATA,
         crossOrigin: 'anonymous',
         updateWhenIdle: true,
         updateWhenZooming: true,
         keepBuffer: isMobileUA ? 1 : 2,
         className: 'filtered-tile',
         maxZoom: MAX_ZOOM,
-        // Limita el nativo cuando hay ahorro de datos/red lenta
         maxNativeZoom: SAVE_DATA ? Math.min(17, MAX_ZOOM) : Math.min(18, MAX_ZOOM),
         errorTileUrl:
             'data:image/gif;base64,R0lGODlhAQABAIABAP///wAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=='
@@ -154,8 +153,8 @@ export { map };
             a.onclick = toggle;
 
             document.addEventListener('fullscreenchange', () => {
-                // Recalcular tamaño/tiles al entrar/salir
                 map.invalidateSize({ animate: false });
+                updatePinchZoomMode(); // por si cambió el layout
             });
 
             L.DomEvent.disableClickPropagation(box);
@@ -169,13 +168,16 @@ export { map };
     let mapVisible = true;
     const io = new IntersectionObserver((entries) => {
         mapVisible = entries[0]?.isIntersecting ?? true;
-        if (mapVisible) map.invalidateSize({ animate: false });
+        if (mapVisible) {
+            map.invalidateSize({ animate: false });
+            updatePinchZoomMode();
+        }
     }, { root: null, threshold: 0.01 });
     io.observe(map.getContainer());
 
     let prefetchScheduled = false;
     const prefetchTiles = (padPx = PREFETCH_PAD_PX) => {
-        if (!mapVisible) return;            // pausa si está fuera de vista
+        if (!mapVisible) return;
         if (prefetchScheduled) return;
         prefetchScheduled = true;
         requestAnimationFrame(() => {
@@ -229,14 +231,48 @@ export { map };
     map.on('dblclick', (e) => fireCoords(e, 'dblclick'));
     map.getContainer().addEventListener('contextmenu', (e) => e.preventDefault(), { passive: false });
 
+    /* ===== MODO PINCH-ZOOM DEL NAVEGADOR AL LLEGAR A MAX_ZOOM ===== */
+    function updatePinchZoomMode() {
+        if (!isMobileUA) return;
+
+        const atMax = map.getZoom() >= MAX_ZOOM;
+        const el = map.getContainer();
+
+        if (atMax) {
+            // 1) Leaflet deja de “comerse” el pellizco
+            if (map.touchZoom.enabled()) map.touchZoom.disable();
+            // 2) Permitimos pinch-zoom del navegador y que se “quede así”
+            el.style.touchAction = 'pinch-zoom';
+            el.classList.add('pinch-image-mode'); // por si querés estilos
+        } else {
+            // Volvemos a control normal de Leaflet
+            if (!map.touchZoom.enabled()) map.touchZoom.enable();
+            el.style.touchAction = 'manipulation';
+            el.classList.remove('pinch-image-mode');
+        }
+    }
+
+    map.whenReady(updatePinchZoomMode);
+    map.on('zoomend', updatePinchZoomMode);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) updatePinchZoomMode();
+    });
+
     /* ===== Resize / orientación robusto ===== */
     let ro = null;
     try {
-        ro = new ResizeObserver(() => map.invalidateSize({ animate: false }));
+        ro = new ResizeObserver(() => {
+            map.invalidateSize({ animate: false });
+            // al cambiar layout podría cambiar el “atMax”; re-evaluamos
+            updatePinchZoomMode();
+        });
         ro.observe(map.getContainer());
     } catch { }
     window.addEventListener('orientationchange', () => {
-        setTimeout(() => map.invalidateSize({ animate: false }), 200);
+        setTimeout(() => {
+            map.invalidateSize({ animate: false });
+            updatePinchZoomMode();
+        }, 200);
     }, { passive: true });
 
     // Guardar referencia global
@@ -252,4 +288,3 @@ export { map };
         } catch { }
     };
 })();
-
