@@ -28,7 +28,7 @@ export { map };
     const DEFAULT_CENTER = [20, 0];
     const DEFAULT_ZOOM = tinyScreen ? 2 : 3;
     // Límite de zoom móvil (más conservador). Cuando llegamos acá, habilitamos pinch-zoom del navegador.
-    const MAX_ZOOM = isMobileUA ? 19 : 18;
+    const MAX_ZOOM = isMobileUA ? 18 : 18;
 
     // Prefetch pad adaptado por dispositivo
     const PREFETCH_PAD_PX = Math.round(256 * (isMobileUA ? 0.75 : 1) * Math.min(dpr, 2));
@@ -288,3 +288,4 @@ export { map };
         } catch { }
     };
 })();
+
