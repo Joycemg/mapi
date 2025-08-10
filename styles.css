@@ -165,4 +165,9 @@ button {
 .leaflet-container { z-index: 1; }
  
 .leaflet-top, .leaflet-bottom { z-index: 1200 !important; }
+
 .pencil-color.selected { outline: 2px solid #2e7dff; }
+
+.pinch-image-mode {
+  cursor: zoom-in;
+}
