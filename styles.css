@@ -1,175 +1,222 @@
-html,
-body,
-#map {
-  margin: 0;
-  height: 100%;
-  overscroll-behavior: none;
-  touch-action: none;
+/* ============================
+   Variables
+============================ */
+:root {
+  --panel-bg: rgba(20,20,20,.95);
+  --panel-fg: #fff;
+  --radius: 4px;
+  --tap: 40px;
+  --z-map: 1;
+  --z-blood: 999;
+  --z-panel: 1100;
+  --z-controls: 1200;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 10px;
+  --font-ui: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+/* ============================
+   Base
+============================ */
+html, body { height: 100%; margin: 0; }
+html, body, #app, #map-wrapper, #map { height: 100%; }
+
+body {
   overscroll-behavior-x: none;
-  touch-action: pan-y;
+  overscroll-behavior-y: none;
+  font-family: var(--font-ui);
+  -webkit-tap-highlight-color: transparent;
 }
 
-html, body, #app, #map-wrapper { height: 100%; }
-#map { height: 100%; min-height: 300px; }
+/* Mapa: alto explícito (fallback + moderno) */
+#map {
+  width: 100%;
+  height: 100vh;      /* fallback universal */
+  min-height: 300px;
+}
+@supports (height: 100dvh) {
+  #map { height: 100dvh; }   /* viewport real en móvil */
+}
 
+/* Gestos Leaflet */
+.leaflet-container { touch-action: pan-x pan-y; }
+.drawing .leaflet-container { touch-action: none; }
+
+/* Tiles con filtro */
 .filtered-tile {
-  filter: grayscale(100%) brightness(60%) contrast(140%) hue-rotate(30deg) sepia(40%) saturate(130%) blur(0.3px);
+  filter: grayscale(100%) brightness(60%) contrast(140%)
+          hue-rotate(30deg) sepia(40%) saturate(130%) blur(.3px);
 }
 
+/* Z-index globales */
+.leaflet-container { z-index: var(--z-map); }
+.leaflet-top, .leaflet-bottom { z-index: var(--z-controls) !important; }
+
+/* ============================
+   Marco decorativo
+============================ */
+#blood-frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none !important;
+  background: url('marco.png') no-repeat center / cover;
+  z-index: var(--z-blood);
+  opacity: .2;
+}
+
+/* ============================
+   Panel inferior
+============================ */
 #panel {
   position: absolute;
+  inset-inline: 0;
   bottom: 0;
-  left: 0;
   width: 100%;
   max-height: 40%;
   overflow-y: auto;
-  background: rgba(20, 20, 20, 0.95);
-  color: white;
-  padding: 10px;
-  font-family: sans-serif;
-  z-index: 1000;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  padding: var(--space-3);
+  z-index: var(--z-panel);
+  font-family: var(--font-ui);
 }
+#panel.is-hidden { display: none !important; }
 
 #add-controls {
   display: flex;
   flex-wrap: wrap;
-  margin-bottom: 10px;
-  gap: 5px;
+  gap: var(--space-2);
+  margin-block-end: var(--space-3);
 }
 
+/* Lista */
 .character-entry {
   display: flex;
   align-items: center;
   justify-content: space-between;
   background: #333;
-  padding: 4px 8px;
-  margin: 4px 0;
-  border-radius: 4px;
+  padding: var(--space-1) var(--space-2);
+  margin-block: var(--space-1);
+  border-radius: var(--radius);
 }
-
 .character-entry span {
   flex: 1;
   overflow: hidden;
-  white-space: nowrap;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-button {
+/* Botones / controles */
+button,
+[role="button"],
+.panel-toggle-btn {
   cursor: pointer;
-}
-
-.marker-label {
-  background: black;
-  color: white;
-  padding: 2px 3px;
-  font-size: 8px;
-  border-radius: 2px;
-}
-
-#blood-frame {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  background: url('marco.png') no-repeat center center;
-  background-size: cover;
-  z-index: 999;
-  opacity: 0.2;
-}
-
-.leaflet-bar .pencil-tools .pencil-color {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-  background: white;
-}
-
-.pencil-color {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1px solid #888;
-  cursor: pointer;
-}
-
-.pencil-color.white {
-  background: white;
-}
-
-.pencil-color.black {
-  background: black;
-}
-
-.pencil-color.red {
-  background: red;
-}
-
-.leaflet-bar a.custom-pencil.active {
-  background-color: #ddd;
-}
-
-.pencil-wrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background: white;
-  padding: 0px;
-}
-
-.color-selector {
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  margin-top: 4px;
+  touch-action: manipulation;
 }
 
 #panel-toggle-container {
   position: absolute;
-  top: 52px;
+  top: 52px; /* debajo del buscador */
   right: 10px;
-  z-index: 1001;
-  background: rgba(0, 0, 0, 0.6);
-  border-radius: 4px;
+  z-index: calc(var(--z-controls) + 1);
+  background: rgba(0,0,0,.6);
+  border-radius: var(--radius);
   padding: 2px 6px;
 }
 
 #toggle-panel {
   background: none;
   border: none;
-  color: white;
+  color: #fff;
   font-size: 12px;
-  cursor: pointer;
-  padding: 2px 4px;
+  padding: 4px 6px;
 }
 
-#panel.is-hidden { display: none !important; }
-/* opcional: ubicar el botón debajo del buscador */
 .panel-toggle-wrap { margin-top: 38px; }
 .panel-toggle-btn {
-  display: inline-block; width: 32px; height: 32px; line-height: 32px;
-  text-align: center; font-weight: 700; text-decoration: none; user-select: none;
+  display: inline-grid;
+  place-items: center;
+  width: 32px; height: 32px;
+  line-height: 32px;
+  text-decoration: none;
+  user-select: none;
+  font-weight: 700;
+  border-radius: var(--radius);
 }
 
-.leaflet-container { touch-action: pan-x pan-y; } /* por defecto */
-.drawing .leaflet-container { touch-action: none; } /* si quisieras usar una clase */
+/* Etiquetas y lápiz */
+.marker-label {
+  background: #000; color: #fff;
+  padding: 2px 3px; font-size: 8px; border-radius: 2px;
+}
 
-#blood-frame { pointer-events:none !important; }
+.leaflet-bar .pencil-tools .pencil-color {
+  display: flex; align-items: center; gap: 4px; padding: 4px; background: #fff;
+}
+.pencil-wrapper { display: flex; flex-direction: column; align-items: center; background: #fff; padding: 0; }
+.color-selector { display: none; flex-direction: column; align-items: center; gap: 2px; margin-top: 4px; }
 
-
-/* que el panel no invada el mapa cuando está visible */
-#panel { z-index: 1100; }
-.leaflet-container { z-index: 1; }
- 
-.leaflet-top, .leaflet-bottom { z-index: 1200 !important; }
-
+.pencil-color {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 1px solid #888; cursor: pointer;
+}
+.pencil-color.white { background: #fff; }
+.pencil-color.black { background: #000; }
+.pencil-color.red   { background: red; }
+.leaflet-bar a.custom-pencil.active { background-color: #ddd; }
 .pencil-color.selected { outline: 2px solid #2e7dff; }
-/*
-.pinch-image-mode {
-  cursor: zoom-in;
+
+/* Estados */
+@media (pointer: coarse) {
+  button, [role="button"], .panel-toggle-btn {
+    min-width: var(--tap); min-height: var(--tap);
+  }
+}
+:where(button, [role="button"], .panel-toggle-btn):focus-visible {
+  outline: 2px solid #2e7dff; outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
 
-*/
+/* Evitá que padding sume ancho extra */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Bloqueá scroll horizontal de la página */
+html, body { overflow-x: hidden; }
+
+/* Si algo enorme se escapa dentro del mapa, que no empuje el layout */
+#map, #map-wrapper { overflow: hidden; }
+
+/* Panel: que nunca exceda el viewport y que el padding no genere overflow */
+#panel {
+  position: fixed;             /* más robusto que absolute respecto a viewport */
+  left: 0; right: 0; bottom: 0;
+  width: auto;                 /* evita width:100% + padding => overflow */
+  max-width: 100vw;            /* tope duro */
+  padding-left: 10px;
+  padding-right: 10px;
+  /* respeta notch en iOS si lo usás */
+  padding-left: max(10px, env(safe-area-inset-left, 0px));
+  padding-right: max(10px, env(safe-area-inset-right, 0px));
+  padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+}
+
+/* Cualquier texto/href largo adentro del panel no debe empujar el ancho */
+#panel .panel-body,
+#panel .character-entry,
+#panel input[type="text"] {
+  overflow-wrap: anywhere;     /* o break-word si preferís */
+  min-width: 0;                /* para hijos flex */
+}
+
+/* El contenedor del botón del panel no debe crear scroll lateral */
+#panel-toggle-container {
+  right: 10px;
+  max-width: 100vw;
+  overflow: visible;           /* pero sin empujar */
+}
+
+/* Por las dudas, controles de Leaflet no rompen layout */
+.leaflet-control { max-width: 100vw; }

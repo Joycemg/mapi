@@ -1,53 +1,125 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es"
+      class="no-js">
 
 <head>
         <meta charset="UTF-8" />
         <title>Mapa Apocalipsis en Tiempo Real</title>
+
         <meta name="viewport"
               content="width=device-width, initial-scale=1" />
 
-        <!-- Leaflet + plugins -->
-        <link rel="stylesheet"
-              href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <link rel="stylesheet"
-              href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
-        <link rel="stylesheet"
-              href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
-        <link rel="stylesheet"
-              href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-        <link rel="stylesheet"
-              href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
 
-        <!-- MapLibre GL (vector tiles) -->
+        <!-- PWA / manifest (no rompe si el archivo no existe aún) -->
+        <link rel="manifest"
+              href="/manifest.webmanifest">
+        <link rel="apple-touch-icon"
+              href="/apple-touch-icon.png">
+
+        <!-- CSP básica (ideal mover a headers del server en prod) -->
+        <meta http-equiv="Content-Security-Policy"
+              content="default-src 'self';
+                 connect-src 'self' https://*.cartocdn.com https://www.gstatic.com https://*.googleapis.com https://firestore.googleapis.com;
+                 img-src 'self' data: blob: https://*.cartocdn.com;
+                 style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com;
+                 script-src 'self' https://unpkg.com https://cdnjs.cloudflare.com https://www.gstatic.com 'unsafe-inline';
+                 font-src 'self' data:;
+                 worker-src 'self' blob:;
+                 object-src 'none';
+                 base-uri 'self';
+                 frame-ancestors 'self';">
+
+        <!-- Preconnect / DNS-prefetch a tiles -->
+        <link rel="preconnect"
+              href="https://a.basemaps.cartocdn.com"
+              crossorigin>
+        <link rel="preconnect"
+              href="https://b.basemaps.cartocdn.com"
+              crossorigin>
+        <link rel="preconnect"
+              href="https://c.basemaps.cartocdn.com"
+              crossorigin>
+        <link rel="preconnect"
+              href="https://d.basemaps.cartocdn.com"
+              crossorigin>
+        <link rel="dns-prefetch"
+              href="//a.basemaps.cartocdn.com">
+        <link rel="dns-prefetch"
+              href="//b.basemaps.cartocdn.com">
+        <link rel="dns-prefetch"
+              href="//c.basemaps.cartocdn.com">
+        <link rel="dns-prefetch"
+              href="//d.basemaps.cartocdn.com">
+
+        <!-- Preconnect Firebase -->
+        <link rel="preconnect"
+              href="https://www.gstatic.com"
+              crossorigin>
+        <link rel="preconnect"
+              href="https://firestore.googleapis.com"
+              crossorigin>
+
+        <!-- Leaflet (unpkg + SRI oficial) -->
         <link rel="stylesheet"
-              href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" />
-        <script src="https://unpkg.com/openmaptiles-language@1.1.0/dist/openmaptiles-language.js"></script>
+              href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+              integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+              crossorigin="anonymous"
+              fetchpriority="high" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+                integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+                crossorigin="anonymous"
+                defer></script>
+
+        <!-- Plugins en cdnjs (pegá el SRI de cdnjs en cada uno) -->
+        <!-- Leaflet.draw 1.0.4 -->
+        <link rel="stylesheet"
+              href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
+              integrity=""
+              crossorigin="anonymous" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"
+                integrity=""
+                crossorigin="anonymous"
+                defer></script>
+
+        <!-- Leaflet Control Geocoder 2.4.0 -->
+        <link rel="stylesheet"
+              href="https://cdnjs.cloudflare.com/ajax/libs/perliedman-leaflet-control-geocoder/2.4.0/Control.Geocoder.min.css"
+              integrity=""
+              crossorigin="anonymous" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/perliedman-leaflet-control-geocoder/2.4.0/Control.Geocoder.min.js"
+                integrity=""
+                crossorigin="anonymous"
+                defer></script>
+
+        <!-- MarkerCluster 1.5.3 -->
+        <link rel="stylesheet"
+              href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"
+              integrity=""
+              crossorigin="anonymous" />
+        <link rel="stylesheet"
+              href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"
+              integrity=""
+              crossorigin="anonymous" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"
+                integrity=""
+                crossorigin="anonymous"
+                defer></script>
+
+        <!-- OpenMapTiles Language (sin SRI oficial publicado) -->
+        <script src="https://unpkg.com/openmaptiles-language@1.1.0/dist/openmaptiles-language.js"
+                defer></script>
+
+        <!-- Firebase compat -->
+        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"
+                defer></script>
+        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"
+                defer></script>
 
         <!-- Tus estilos -->
         <link rel="stylesheet"
               href="styles.css" />
 
-        <!-- Scripts base Leaflet -->
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-        <script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.js"></script>
-        <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-
-        <!-- MapLibre GL -->
-        <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
-        <!-- Puente Leaflet ↔ MapLibre -->
-        <script src="https://unpkg.com/maplibre-gl-leaflet/leaflet-maplibre-gl.js"></script>
-        <!-- OpenMapTiles Language (para forzar name:es) -->
-        <script src="https://unpkg.com/openmaptiles-language@1.1.0/dist/openmaptiles-language.js"></script>
-
-        <!-- Firebase compat (v9+) -->
-        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-
-        <!-- Sugerencia rápida por si styles.css no define #map -->
         <style>
-                /* Eliminá esto si ya lo tenés en styles.css */
                 html,
                 body {
                         height: 100%;
@@ -65,39 +137,94 @@
                         right: 0;
                         bottom: 0;
                 }
+
+                .sr-only {
+                        position: absolute;
+                        width: 1px;
+                        height: 1px;
+                        padding: 0;
+                        margin: -1px;
+                        overflow: hidden;
+                        clip: rect(0, 0, 0, 0);
+                        white-space: nowrap;
+                        border: 0;
+                }
+
+                .no-js #panel {
+                        display: none;
+                }
         </style>
+
+        <!-- modulepreload: ES modules -->
+        <link rel="modulepreload"
+              href="./config/firebase.js" />
+        <link rel="modulepreload"
+              href="./modules/Map.js" />
+        <link rel="modulepreload"
+              href="./modules/panel.js" />
+        <link rel="modulepreload"
+              href="./modules/panelToggle.js" />
+        <link rel="modulepreload"
+              href="./modules/geocoder.js" />
+        <link rel="modulepreload"
+              href="./modules/Draw.js" />
+        <link rel="modulepreload"
+              href="./modules/pencil.js" />
+        <link rel="modulepreload"
+              href="./modules/characters.js" />
+        <link rel="modulepreload"
+              href="./modules/coords.js" />
+        <link rel="modulepreload"
+              href="./modules/notes.js" />
+        <link rel="modulepreload"
+              href="./modules/sw.js" />
+
+        <script>document.documentElement.classList.replace('no-js', 'js');</script>
 </head>
 
 <body>
-        <noscript>Necesitas habilitar JavaScript para ver el mapa.</noscript>
+        <noscript>Necesitás habilitar JavaScript para ver el mapa.</noscript>
 
         <div id="map"
              role="application"
-             aria-label="Mapa principal"></div>
+             aria-label="Mapa principal"
+             tabindex="0"></div>
 
-        <!-- Panel inferior -->
         <div id="panel"
-             class="panel">
+             class="panel"
+             role="region"
+             aria-label="Panel de controles">
                 <div class="panel-body"
                      id="add-controls">
+                        <label for="name"
+                               class="sr-only">Nombre del personaje</label>
                         <input type="text"
                                id="name"
-                               placeholder="Nombre del personaje" />
+                               placeholder="Nombre del personaje"
+                               autocomplete="off"
+                               inputmode="text"
+                               enterkeyhint="done" />
+                        <label for="color"
+                               class="sr-only">Color</label>
                         <input type="color"
                                id="color"
                                value="#ff0000" />
-                        <button id="add-button">Agregar pj</button>
+                        <button id="add-button"
+                                type="button"
+                                aria-controls="character-list"
+                                aria-label="Agregar personaje al mapa">Agregar pj</button>
                 </div>
                 <div class="panel-body"
-                     id="character-list"></div>
+                     id="character-list"
+                     aria-live="polite"
+                     aria-busy="false"></div>
         </div>
 
         <!-- Config Firebase -->
         <script type="module"
                 src="./config/firebase.js"></script>
 
-        <!-- Módulos (orden recomendado) -->
-        <!-- Map.js depende de Leaflet, MapLibre y openmaptiles-language ya cargados arriba -->
+        <!-- Módulos (type=module ya es defer) -->
         <script type="module"
                 src="./modules/Map.js"></script>
         <script type="module"
@@ -116,6 +243,20 @@
                 src="./modules/coords.js"></script>
         <script type="module"
                 src="./modules/notes.js"></script>
+        <script type="module"
+                src="./modules/sw.js"></script>
+
+        <!-- Logger genérico de errores de carga de módulos (no cambia tu flujo) -->
+        <script type="module">
+                const mods = [
+                        "./modules/Map.js", "./modules/panel.js", "./modules/panelToggle.js",
+                        "./modules/geocoder.js", "./modules/Draw.js", "./modules/pencil.js",
+                        "./modules/characters.js", "./modules/coords.js", "./modules/notes.js", "./modules/sw.js"
+                ];
+                for (const m of mods) {
+                        import(m).catch(err => console.error("[Module load error]", m, err));
+                }
+        </script>
 </body>
 
 </html>
