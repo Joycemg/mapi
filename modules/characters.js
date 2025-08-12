@@ -53,13 +53,17 @@ function openStreetViewPreferApp(lat, lng) {
     const isMobile = isAndroid || isiOS;
 
     if (isMobile) {
+        // 1) intento “silencioso” con iframe oculto (no cambia la URL ni el historial)
+        const deepLink = isAndroid ? androidStreetView : iosStreetView;
         try {
             const iframe = document.createElement('iframe');
             iframe.style.display = 'none';
-            iframe.src = isAndroid ? androidStreetView : iosStreetView;
+            iframe.src = deepLink;
             document.body.appendChild(iframe);
             setTimeout(() => { try { document.body.removeChild(iframe); } catch { } }, 1500);
-        } catch { }
+        } catch { /* no-op */ }
+
+        // 2) segundo intento sólo Android con intent:// (algunos navegadores lo requieren)
         if (isAndroid) {
             try {
                 const a = document.createElement('a');
@@ -68,11 +72,15 @@ function openStreetViewPreferApp(lat, lng) {
                 document.body.appendChild(a);
                 a.click();
                 setTimeout(() => { try { a.remove(); } catch { } }, 0);
-            } catch { }
+            } catch { /* no-op */ }
         }
+
+        // 👇 SIN fallback web en mobile
         return;
     }
-    try { window.open(webStreetView, '_blank', 'noopener'); } catch { }
+
+    // Desktop: abrir Street View web en pestaña nueva
+    try { window.open(webStreetView, '_blank', 'noopener'); } catch { /* no-op */ }
 }
 
 /* -------- GeoPoint compat (v8 global o v9 modular) ---- */
@@ -385,13 +393,17 @@ function maybeAutoPan(ll) {
 }
 
 /* ======================================================
-   Clustering (con corte a zoom de calle)
+   Clustering (modo híbrido: cluster <-> sin cluster)
 ====================================================== */
+const UNCLUSTER_ZOOM = 16;
 let clusterGroup = null;
+const plainGroup = L.layerGroup().addTo(map);
+let useCluster = false; // se decide al crear clusterGroup
+
 (function ensureClusterGroup() {
     if (L.markerClusterGroup) {
         clusterGroup = L.markerClusterGroup({
-            disableClusteringAtZoom: 17,
+            disableClusteringAtZoom: UNCLUSTER_ZOOM,
             spiderfyOnMaxZoom: true,
             showCoverageOnHover: false,
             zoomToBoundsOnClick: true,
@@ -411,16 +423,54 @@ let clusterGroup = null;
             }
         });
         map.addLayer(clusterGroup);
+        useCluster = true;
     } else {
         console.warn('[characters] markercluster no encontrado. Sin clustering.');
+        useCluster = false;
     }
 })();
-function addMarkerToMapOrCluster(marker) { if (clusterGroup) clusterGroup.addLayer(marker); else marker.addTo(map); }
-function removeMarkerFromMapOrCluster(marker) { if (clusterGroup) clusterGroup.removeLayer(marker); else map.removeLayer(marker); }
-function zoomToMarker(marker, zoom = 17) {
-    if (!clusterGroup) { map.setView(marker.getLatLng(), zoom); return; }
-    clusterGroup.zoomToShowLayer(marker, () => map.setView(marker.getLatLng(), zoom));
+
+function addMarkerToMapOrCluster(marker) {
+    if (useCluster && clusterGroup) clusterGroup.addLayer(marker);
+    else plainGroup.addLayer(marker);
 }
+function removeMarkerFromMapOrCluster(marker) {
+    if (useCluster && clusterGroup) clusterGroup.removeLayer(marker);
+    else plainGroup.removeLayer(marker);
+}
+function zoomToMarker(marker, zoom = 17) {
+    if (useCluster && clusterGroup) {
+        clusterGroup.zoomToShowLayer(marker, () => map.setView(marker.getLatLng(), zoom));
+    } else {
+        map.setView(marker.getLatLng(), zoom);
+    }
+}
+
+// Cambia entre cluster y plano según el zoom actual
+function syncClusterMode() {
+    const wantPlain = map.getZoom() >= UNCLUSTER_ZOOM;
+
+    if (wantPlain && useCluster) {
+        // Mover TODO del cluster al grupo plano
+        const toMove = [];
+        clusterGroup.eachLayer(l => toMove.push(l));
+        if (toMove.length) {
+            clusterGroup.removeLayers(toMove);         // método del plugin
+            toMove.forEach(l => plainGroup.addLayer(l));
+        }
+        useCluster = false;
+    } else if (!wantPlain && !useCluster && clusterGroup) {
+        // Volver del grupo plano al cluster
+        const toMove = (plainGroup.getLayers?.() || []);
+        if (toMove.length) {
+            plainGroup.clearLayers();
+            clusterGroup.addLayers(toMove);            // método del plugin
+        }
+        useCluster = true;
+    }
+}
+map.whenReady(syncClusterMode);
+map.on('zoomend', syncClusterMode);
 
 /* ======================================================
    Snap a ruta (modo MANUAL con SHIFT)
