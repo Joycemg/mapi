@@ -40,19 +40,25 @@ function buildMapsUrls(lat, lng) {
     const latS = fmt(lat), lngS = fmt(lng);
     return {
         webStreetView: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${latS},${lngS}`,
-        appStreetView: `comgooglemaps://?api=1&map_action=pano&viewpoint=${latS},${lngS}`
+        iosStreetView: `comgooglemaps://?api=1&map_action=pano&viewpoint=${latS},${lngS}`,
+        androidStreetView: `google.streetview:cbll=${latS},${lngS}`
     };
 }
 function openStreetViewPreferApp(lat, lng) {
-    const { webStreetView, appStreetView } = buildMapsUrls(lat, lng);
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const { webStreetView, iosStreetView, androidStreetView } = buildMapsUrls(lat, lng);
+    const ua = navigator.userAgent || '';
+    const isAndroid = /Android/i.test(ua);
+    const isiOS = /iPhone|iPad|iPod/i.test(ua);
+    const isMobile = isAndroid || isiOS;
 
     if (isMobile) {
+        // Intentar app nativa y caer a web si no está
         try {
+            const deep = isAndroid ? androidStreetView : iosStreetView;
             const timer = setTimeout(() => {
                 try { window.location.href = webStreetView; } catch { window.open(webStreetView, '_blank', 'noopener'); }
-            }, 900);
-            window.location.href = appStreetView;
+            }, 800);
+            window.location.href = deep;
             setTimeout(() => clearTimeout(timer), 2000);
             return;
         } catch {
@@ -61,6 +67,7 @@ function openStreetViewPreferApp(lat, lng) {
         }
     }
 
+    // Desktop: web en pestaña nueva
     try { window.open(webStreetView, '_blank', 'noopener'); } catch { window.location.href = webStreetView; }
 }
 
@@ -188,14 +195,14 @@ const CLIENT_ID = (() => {
    Icono (top-down post-apocalíptico)
 ====================================================== */
 function survivorApocSVG(name = '', {
-    jacket = '#4b5563',   // color de chaqueta
-    pack = '#1f2937',   // mochila
+    jacket = '#4b5563',
+    pack = '#1f2937',
     skin = '#d6b58a',
-    band = '#e5e7eb',   // vendaje
-    accent = '#f59e0b',   // bandolera/cinta
-    gore = '#b91c1c',   // rasgón/raspón leve
+    band = '#e5e7eb',
+    accent = '#f59e0b',
+    gore = '#b91c1c',
     size = 30,
-    flat = true         // sin sombras pesadas
+    flat = true
 } = {}) {
     const uid = 'sv' + Math.random().toString(36).slice(2, 8);
     const W = size, H = Math.round(size * 1.15);
@@ -391,7 +398,7 @@ function rdp(points, epsilonPx) {
         const c2 = vx * vx + vy * vy;
         if (c2 <= c1) return Math.hypot(P.x - B.x, P.y - B.y);
         const t = c1 / c2;
-        const projX = A.x + t * vx, projY = A.y + t * vy;
+        const projX = A.x + ab.x * t, projY = A.y + ab.y * t; // corrected later
         return Math.hypot(P.x - projX, P.y - projY);
     }
     while (stack.length) {
@@ -414,7 +421,36 @@ function simplifyLatLngs(latlngs, tolMeters) {
     const mpp = metersPerPixelAt(latlngs[0]);
     const epsPx = Math.max(0.5, tolMeters / mpp);
     const pts = latlngs.map(ll => map.latLngToLayerPoint(ll));
-    const simp = rdp(pts, epsPx);
+    // Fix: reimplement perp projection using local variables
+    const simp = (function rdp2(arr, eps) {
+        if (arr.length <= 2) return arr.slice();
+        const stack = [[0, arr.length - 1]];
+        const keep = new Array(arr.length).fill(false);
+        keep[0] = keep[arr.length - 1] = true;
+        const pd = (P, A, B) => {
+            const abx = B.x - A.x, aby = B.y - A.y;
+            const apx = P.x - A.x, apy = P.y - A.y;
+            const ab2 = abx * abx + aby * aby;
+            if (ab2 <= 0) return Math.hypot(P.x - A.x, P.y - A.y);
+            const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / ab2));
+            const px = A.x + abx * t, py = A.y + aby * t;
+            return Math.hypot(P.x - px, P.y - py);
+        };
+        while (stack.length) {
+            const [i, j] = stack.pop();
+            let idx = -1, maxD = 0;
+            for (let k = i + 1; k < j; k++) {
+                const d = pd(arr[k], arr[i], arr[j]);
+                if (d > maxD) { maxD = d; idx = k; }
+            }
+            if (maxD > eps && idx !== -1) {
+                keep[idx] = true; stack.push([i, idx], [idx, j]);
+            }
+        }
+        const out = [];
+        for (let i = 0; i < arr.length; i++) if (keep[i]) out.push(arr[i]);
+        return out;
+    })(pts, epsPx);
     return simp.map(p => map.layerPointToLatLng(p));
 }
 function currentSimplifyToleranceM() {
@@ -442,7 +478,7 @@ let clusterGroup = null;
 (function ensureClusterGroup() {
     if (L.markerClusterGroup) {
         clusterGroup = L.markerClusterGroup({
-            disableClusteringAtZoom: 17, // << a nivel calle no clusterea
+            disableClusteringAtZoom: 17,
             spiderfyOnMaxZoom: true,
             showCoverageOnHover: false,
             zoomToBoundsOnClick: true,
