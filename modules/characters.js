@@ -52,7 +52,6 @@ function openStreetViewPreferApp(lat, lng) {
     const isMobile = isAndroid || isiOS;
 
     if (isMobile) {
-        // Intentar app nativa y caer a web si no está
         try {
             const deep = isAndroid ? androidStreetView : iosStreetView;
             const timer = setTimeout(() => {
@@ -67,68 +66,8 @@ function openStreetViewPreferApp(lat, lng) {
         }
     }
 
-    // Desktop: web en pestaña nueva
     try { window.open(webStreetView, '_blank', 'noopener'); } catch { window.location.href = webStreetView; }
 }
-
-/* -------- Follow (seguir pj) -------------------------- */
-let followId = null;
-let lastFollowPan = 0;
-const FOLLOW_THROTTLE_MS = 180;
-
-function isFollowing(id) { return !!id && id === followId; }
-
-function updateFollowButtonsUi() {
-    try {
-        const list = document.getElementById('character-list');
-        if (!list) return;
-        const btns = list.querySelectorAll('button.btn-follow[data-id]');
-        btns.forEach(b => {
-            const id = b.dataset.id;
-            const active = isFollowing(id);
-            b.setAttribute('aria-pressed', String(active));
-            b.classList.toggle('is-active', active);
-            b.title = active ? 'Dejar de seguir' : 'Seguir';
-        });
-    } catch { }
-}
-
-function startFollow(id) {
-    followId = id || null;
-    updateFollowButtonsUi();
-    const m = markers[followId];
-    if (m) { try { map.panTo(m.getLatLng(), { animate: false }); } catch { } }
-}
-
-function stopFollow() {
-    if (!followId) return;
-    followId = null;
-    updateFollowButtonsUi();
-}
-
-function toggleFollow(id) {
-    if (!id) return;
-    if (isFollowing(id)) stopFollow();
-    else startFollow(id);
-}
-
-function maybeFollowPan(id, ll) {
-    if (!isFollowing(id) || !ll) return;
-    if (window.__CHAR_IS_DRAGGING) return;
-    const now = Date.now();
-    if (now - lastFollowPan < FOLLOW_THROTTLE_MS) return;
-    lastFollowPan = now;
-    try { map.panTo(ll, { animate: false }); } catch { }
-}
-
-// Si el usuario mueve/zoomea el mapa, dejamos de seguir
-(function bindStopFollowOnUserPan() {
-    try {
-        const onStart = () => { if (!window.__CHAR_IS_DRAGGING) stopFollow(); };
-        map.on('movestart', onStart);
-        map.on('zoomstart', onStart);
-    } catch { }
-})();
 
 /* -------- GeoPoint compat (v8 global o v9 modular) ---- */
 let GeoPointCtor = null;
@@ -376,8 +315,6 @@ const EDGE_PX = 50;
 const PAN_STEP_PX = 40;
 const PAN_THROTTLE_MS = 40;
 let lastPanTs = 0;
-const SIMPLIFY_MIN_TOL_M = 2.0;
-const SIMPLIFY_MAX_TOL_M = 5.0;
 
 function metersPerPixelAt(ll) {
     const p = map.latLngToLayerPoint(ll);
@@ -385,44 +322,14 @@ function metersPerPixelAt(ll) {
     const ll2 = map.layerPointToLatLng(p2);
     return map.distance(ll, ll2) || 1;
 }
-function rdp(points, epsilonPx) {
-    if (points.length <= 2) return points.slice();
-    const stack = [[0, points.length - 1]];
-    const keep = new Array(points.length).fill(false);
-    keep[0] = keep[points.length - 1] = true;
-    function perpDist(P, A, B) {
-        const vx = B.x - A.x, vy = B.y - A.y;
-        const wx = P.x - A.x, wy = P.y - A.y;
-        const c1 = vx * wx + vy * wy;
-        if (c1 <= 0) return Math.hypot(P.x - A.x, P.y - A.y);
-        const c2 = vx * vx + vy * vy;
-        if (c2 <= c1) return Math.hypot(P.x - B.x, P.y - B.y);
-        const t = c1 / c2;
-        const projX = A.x + ab.x * t, projY = A.y + ab.y * t; // corrected later
-        return Math.hypot(P.x - projX, P.y - projY);
-    }
-    while (stack.length) {
-        const [i, j] = stack.pop();
-        let idx = -1, maxD = 0;
-        for (let k = i + 1; k < j; k++) {
-            const d = perpDist(points[k], points[i], points[j]);
-            if (d > maxD) { maxD = d; idx = k; }
-        }
-        if (maxD > epsilonPx && idx !== -1) {
-            keep[idx] = true; stack.push([i, idx], [idx, j]);
-        }
-    }
-    const out = [];
-    for (let i = 0; i < points.length; i++) if (keep[i]) out.push(points[i]);
-    return out;
-}
 function simplifyLatLngs(latlngs, tolMeters) {
     if (!latlngs || latlngs.length <= 2) return latlngs || [];
     const mpp = metersPerPixelAt(latlngs[0]);
     const epsPx = Math.max(0.5, tolMeters / mpp);
     const pts = latlngs.map(ll => map.latLngToLayerPoint(ll));
-    // Fix: reimplement perp projection using local variables
-    const simp = (function rdp2(arr, eps) {
+
+    // Ramer–Douglas–Peucker iterativo (proyección perpendicular correcta)
+    const rdpSimplify = (arr, eps) => {
         if (arr.length <= 2) return arr.slice();
         const stack = [[0, arr.length - 1]];
         const keep = new Array(arr.length).fill(false);
@@ -450,12 +357,16 @@ function simplifyLatLngs(latlngs, tolMeters) {
         const out = [];
         for (let i = 0; i < arr.length; i++) if (keep[i]) out.push(arr[i]);
         return out;
-    })(pts, epsPx);
+    };
+
+    const simp = rdpSimplify(pts, epsPx);
     return simp.map(p => map.layerPointToLatLng(p));
 }
 function currentSimplifyToleranceM() {
     const z = map.getZoom?.() ?? 13;
     const t = L.Util.clamp(14 - z, 0, 5);
+    const SIMPLIFY_MIN_TOL_M = 2.0;
+    const SIMPLIFY_MAX_TOL_M = 5.0;
     return L.Util.clamp(SIMPLIFY_MIN_TOL_M + t, SIMPLIFY_MIN_TOL_M, SIMPLIFY_MAX_TOL_M);
 }
 function maybeAutoPan(ll) {
@@ -464,10 +375,12 @@ function maybeAutoPan(ll) {
     const cpt = map.latLngToContainerPoint(ll);
     const { x: w, y: h } = map.getSize();
     let dx = 0, dy = 0;
-    if (cpt.x < EDGE_PX) dx = -PAN_STEP_PX;
-    else if (cpt.x > w - EDGE_PX) dx = PAN_STEP_PX;
-    if (cpt.y < EDGE_PX) dy = -PAN_STEP_PX;
-    else if (cpt.y > h - EDGE_PX) dy = PAN_STEP_PX;
+    const EDGE_PX = 50;
+    const PAN_STEP_PX_LOCAL = 40;
+    if (cpt.x < EDGE_PX) dx = -PAN_STEP_PX_LOCAL;
+    else if (cpt.x > w - EDGE_PX) dx = PAN_STEP_PX_LOCAL;
+    if (cpt.y < EDGE_PX) dy = -PAN_STEP_PX_LOCAL;
+    else if (cpt.y > h - EDGE_PX) dy = PAN_STEP_PX_LOCAL;
     if (dx || dy) { map.panBy([dx, dy], { animate: false }); lastPanTs = now; }
 }
 
@@ -752,8 +665,6 @@ const renderCharacter = (doc) => {
             const finalLL = target.getLatLng();
             notifyGeocoderMove(id, finalLL);
             publishToGeocoder();
-
-            maybeFollowPan(id, finalLL);
         });
 
         markers[id] = marker;
@@ -771,10 +682,7 @@ const renderCharacter = (doc) => {
 
         try {
             const ll = markers[id].getLatLng?.();
-            if (ll) {
-                notifyGeocoderMove(id, ll);
-                maybeFollowPan(id, ll);
-            }
+            if (ll) notifyGeocoderMove(id, ll);
         } catch { }
 
         publishToGeocoder();
@@ -845,7 +753,7 @@ const renderCharacter = (doc) => {
         charDeleteModal = null;
     }
 
-    // entrada en la lista
+    // entrada en la lista (sin botón Seguir)
     if (!characterEntries[id]) {
         const entry = document.createElement('div');
         entry.className = 'character-entry';
@@ -853,8 +761,7 @@ const renderCharacter = (doc) => {
         entry.innerHTML = `
       <span>${escapeHtml(desiredName)}</span>
       <button data-action="locate" data-id="${id}" title="Centrar">📍</button>
-      <button data-action="follow" data-id="${id}" class="btn-follow" title="Seguir" aria-pressed="false">👁️</button>
-      <button data-action="copy"   data-id="${id}" class="btn-copy"   title="Copiar coordenadas y abrir Street View">📋</button>
+      <button data-action="copy"   data-id="${id}" class="btn-copy" title="Copiar coordenadas y abrir Street View">📋</button>
       <button data-action="delete" data-id="${id}" title="Borrar">❌</button>
     `;
         document.getElementById('character-list')?.appendChild(entry);
@@ -865,7 +772,6 @@ const renderCharacter = (doc) => {
             const action = btn.dataset.action; const targetId = btn.dataset.id;
 
             if (action === 'locate') locateCharacter(targetId);
-            if (action === 'follow') toggleFollow(targetId);
             if (action === 'delete') openDeleteCharacterModal(targetId);
 
             if (action === 'copy') {
@@ -878,11 +784,8 @@ const renderCharacter = (doc) => {
                 openStreetViewPreferApp(ll.lat, ll.lng);
             }
         });
-
-        updateFollowButtonsUi();
     } else {
         characterEntries[id].querySelector('span').textContent = desiredName;
-        updateFollowButtonsUi();
     }
 };
 
@@ -900,8 +803,6 @@ function deleteCharacter(id) {
     delete remoteTrails[id];
 
     if (markers[id]) { removeMarkerFromMapOrCluster(markers[id]); delete markers[id]; }
-
-    if (isFollowing(id)) stopFollow();
 
     trailsRef.doc(id).delete().catch(() => { });
     charactersRef.doc(id).delete();
@@ -934,7 +835,6 @@ charactersRef.onSnapshot((snap) => {
             if (characterEntries[id]) { characterEntries[id].remove(); delete characterEntries[id]; }
             trailsRef.doc(id).delete().catch(() => { });
             delete markerState[id];
-            if (isFollowing(id)) stopFollow();
             publishToGeocoder();
         }
     });
@@ -1003,12 +903,6 @@ trailsRef.onSnapshot((snap) => {
     .mc-small{ width:32px; height:32px; }
     .mc-med{ width:40px; height:40px; }
     .mc-large{ width:48px; height:48px; }
-
-    /* Botón seguir activo */
-    .character-entry .btn-follow.is-active,
-    .character-entry .btn-follow[aria-pressed="true"]{
-      background:#2563eb; color:#fff; border-color:#2563eb;
-    }
   `;
     document.head.appendChild(style);
 })();
@@ -1025,10 +919,7 @@ trailsRef.onSnapshot((snap) => {
                 const ids = Object.keys(markers);
                 for (const id of ids) {
                     const ll = markers[id]?.getLatLng?.();
-                    if (ll) {
-                        notifyGeocoderMove(id, ll);
-                        maybeFollowPan(id, ll);
-                    }
+                    if (ll) notifyGeocoderMove(id, ll);
                 }
             } catch { }
         }
