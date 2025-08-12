@@ -3,9 +3,8 @@ import { map } from './Map.js';
 import { drawnItems } from './Draw.js';
 import { db } from '../config/firebase.js';
 import { hidePanel, showPanel } from './panel.js';
+import { registerTool, toggleTool } from './toolsBus.js';
 
-
-import { registerTool, toggleTool, activateTool, deactivateTool, isToolActive } from './toolsBus.js';
 /* =========================
    Estado / Config
 ========================= */
@@ -15,7 +14,11 @@ let currentLine = null;
 let currentRef = null;           // doc ref Firestore del trazo en curso
 let points = [];                 // L.LatLng[]
 let lastUpdate = 0;
-const UPDATE_EVERY_MS = 100;
+
+// ***** Throttle adaptativo (reemplaza UPDATE_EVERY_MS) *****
+let dynamicUpdateEveryMs = 100;
+let lastMoveLL = null;
+let lastMoveTs = 0;
 
 let selectedColor = 'black';
 let selectedWeight = 4;          // default medio
@@ -67,10 +70,7 @@ const makeChip = (parent) => {
     setStyles(b, chipBase);
     b.tabIndex = 0;
     b.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter' || ev.key === ' ') {
-            ev.preventDefault();
-            b.click();
-        }
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); b.click(); }
     });
     L.DomEvent.on(b, 'pointerdown', (e) => e.stopPropagation());
     L.DomEvent.on(b, 'touchstart', (e) => e.stopPropagation());
@@ -91,6 +91,36 @@ function isOverUI(ev) {
     if (!p) return false;
     const el = document.elementFromPoint(p.x, p.y);
     return !!el?.closest?.('.leaflet-control, .leaflet-bar, .pencil-wrapper');
+}
+
+/* ====== Simplificación y throttle adaptativo ====== */
+// metros por pixel en el centro de la vista (aprox local)
+function metersPerPixelAtCenter() {
+    try {
+        const c = map.getCenter();
+        const p1 = map.latLngToLayerPoint(c);
+        const p2 = L.point(p1.x + 1, p1.y);
+        const m = map.distance(map.layerPointToLatLng(p1), map.layerPointToLatLng(p2));
+        return m || 1; // m/px
+    } catch { return 1; }
+}
+// Usa Douglas–Peucker en espacio de “pixels de capa”, con tolerancia en metros
+function simplifyLatLngsByMeters(latlngs, tolMeters = 3) {
+    if (!Array.isArray(latlngs) || latlngs.length < 3) return latlngs || [];
+    const mpp = metersPerPixelAtCenter();
+    const tolPx = Math.max(1, tolMeters / mpp);
+    const pts = latlngs.map(ll => map.latLngToLayerPoint(ll));
+    const simplePts = L.LineUtil.simplify(pts, tolPx);
+    return simplePts.map(pt => map.layerPointToLatLng(pt));
+}
+// Adaptar intervalo de push según velocidad estimada (m/s)
+function calcAdaptiveInterval(prevLL, nowLL, dtMs) {
+    if (!prevLL || !nowLL || !isFinite(dtMs) || dtMs <= 0) return 100;
+    const distM = map.distance(prevLL, nowLL);
+    const v = distM / (dtMs / 1000);
+    if (v > 6) return 180;
+    if (v > 2) return 120;
+    return 80;
 }
 
 /* =========================
@@ -123,9 +153,9 @@ const PencilControl = L.Control.extend({
         configPanel = L.DomUtil.create('div', 'pencil-config-panel', wrapper);
         setStyles(configPanel, {
             position: 'absolute',
-            top: '0',        // 👈 alinear arriba con el botón
-            left: '100%',    // 👈 desplazar a la derecha del botón
-            marginLeft: '6px', // 👈 pequeña separación para que no se pegue
+            top: '0',
+            left: '100%',
+            marginLeft: '6px',
             display: 'none',
             background: '#fff',
             border: '1px solid #d1d5db',
@@ -173,12 +203,12 @@ const PencilControl = L.Control.extend({
         const colorLabel = L.DomUtil.create('div', '', toolbar);
         colorLabel.textContent = '🎨';
         setStyles(colorLabel, { fontSize: '14px', textAlign: 'center', width: '18px' });
-        toolbar.append(makeColorSelector(true));  // compacto
+        toolbar.append(makeColorSelector(true));
 
         const weightLabel = L.DomUtil.create('div', '', toolbar);
         weightLabel.textContent = '📏';
         setStyles(weightLabel, { fontSize: '14px', textAlign: 'center', width: '18px' });
-        toolbar.append(makeWeightSelector(true)); // compacto
+        toolbar.append(makeWeightSelector(true));
 
         const applyResponsive = () => {
             const oneCol = window.innerWidth < 360;
@@ -199,7 +229,6 @@ const PencilControl = L.Control.extend({
 
 map.addControl(new PencilControl());
 
-
 // === toolsBus: registro de herramientas (exclusivo) ===
 try {
     registerTool('pencil', {
@@ -207,7 +236,6 @@ try {
         enable: () => enablePencil(),
         disable: () => disablePencil(),
         isActive: () => mode === 'pencil',
-        // Soporta tanto el botón del control Leaflet como un botón opcional en tu HTML
         buttons: ['#btn-pencil']
     });
 
@@ -220,7 +248,6 @@ try {
     });
 } catch (e) { console.error('[pencil] toolsBus register error:', e); }
 
-
 function createBtn(icon, cls, title, container, onClick, withPreview = false) {
     const a = L.DomUtil.create('a', cls, container);
     a.href = '#';
@@ -231,7 +258,7 @@ function createBtn(icon, cls, title, container, onClick, withPreview = false) {
     a.innerHTML = `<span class="icon" style="display:block;line-height:16px;text-align:center;">${icon}</span>`;
     if (withPreview) {
         a.innerHTML += `<div class="stroke-preview" 
-        style="width:20px;height:0;border-top:4px solid black;margin:4px auto 2px;border-radius:2px;"></div>`;
+      style="width:20px;height:0;border-top:4px solid black;margin:4px auto 2px;border-radius:2px;"></div>`;
     }
     a.onclick = (e) => { e.preventDefault(); onClick(); };
     return a;
@@ -243,11 +270,10 @@ function guardBtn(el) {
 }
 
 /* =========================
-   Selectores (compactos)
+   Selectores compactos
 ========================= */
-function makeColorSelector(/* compacto = false (ya no lo necesitamos) */) {
+function makeColorSelector() {
     const wrap = L.DomUtil.create('div', 'color-selector');
-    // Grid: 2 por fila
     setStyles(wrap, {
         display: 'grid',
         gridTemplateColumns: 'repeat(2, auto)',
@@ -258,7 +284,6 @@ function makeColorSelector(/* compacto = false (ya no lo necesitamos) */) {
     });
 
     const colors = ['black', 'white', '#e11d48', '#10b981'];
-
     const mark = (btn) => {
         [...wrap.children].forEach(el => {
             el.style.outline = 'none';
@@ -291,14 +316,12 @@ function makeColorSelector(/* compacto = false (ya no lo necesitamos) */) {
         if (name === 'white') btn.style.boxShadow = 'inset 0 0 0 1px #9ca3af';
 
         wrap.append(btn);
-
         if (selectedColor === name) mark(btn);
 
         btn.onclick = () => {
             selectedColor = name;
             mark(btn);
             updatePencilPreview();
-            // actualizar previews de peso
             wrap.parentElement?.parentElement
                 ?.querySelectorAll('.weight-chip svg line')
                 .forEach(line => line.setAttribute('stroke', selectedColor));
@@ -310,9 +333,9 @@ function makeColorSelector(/* compacto = false (ya no lo necesitamos) */) {
 
     return wrap;
 }
-function makeWeightSelector(/* compacto = false (ya no lo necesitamos) */) {
+
+function makeWeightSelector() {
     const wrap = L.DomUtil.create('div', 'weight-selector');
-    // Grid: 2 por fila
     setStyles(wrap, {
         display: 'grid',
         gridTemplateColumns: 'repeat(2, auto)',
@@ -330,7 +353,6 @@ function makeWeightSelector(/* compacto = false (ya no lo necesitamos) */) {
         btn.title = `Grosor ${w}px`;
         btn.setAttribute('aria-label', `Grosor ${w}px`);
 
-        // Compacto y pareja visual con 2 por fila
         setStyles(btn, {
             display: 'flex',
             alignItems: 'center',
@@ -434,21 +456,16 @@ function finishOrCancelStroke() {
 }
 
 function handlePencilClick() {
-    // cancelar/terminar trazo actual para evitar estados colgados
     finishOrCancelStroke();
     swallowNext(260);
-    // Exclusivo via bus: alternar herramienta lápiz
     if (typeof toggleTool === 'function') toggleTool('pencil', { manual: true });
 }
 
 function handleEraserClick() {
-    // cancelar/terminar trazo actual para evitar estados colgados
     finishOrCancelStroke();
     swallowNext(260);
-    // Exclusivo via bus: alternar herramienta goma
     if (typeof toggleTool === 'function') toggleTool('eraser', { manual: true });
 }
-
 
 // Export util para apagar cualquier herramienta activa desde otros módulos
 export function deactivateDrawingTools() {
@@ -476,10 +493,8 @@ function enablePencil() {
     map.on('touchmove', onMove);
     map.on('touchend', onUp);
 
-    // 🔐 Redes de seguridad adicionales:
-    // 1) si el puntero sale del mapa, terminar/cancelar
+    // Redes de seguridad
     L.DomEvent.on(map.getContainer(), 'pointerleave', onMapPointerLeave);
-    // 2) escucha global en captura: si el dedo cae sobre UI, cortar
     document.addEventListener('pointermove', onGlobalPointerMove, true);
     document.addEventListener('pointerup', onGlobalPointerUp, true);
 }
@@ -499,12 +514,12 @@ function disablePencil() {
     map.off('touchmove', onMove);
     map.off('touchend', onUp);
 
-    // quitar redes de seguridad
     L.DomEvent.off(map.getContainer(), 'pointerleave', onMapPointerLeave);
     document.removeEventListener('pointermove', onGlobalPointerMove, true);
     document.removeEventListener('pointerup', onGlobalPointerUp, true);
 
     isDrawing = false; currentLine = null; currentRef = null; points = [];
+    lastMoveLL = null; lastMoveTs = 0;
 }
 
 function onMapPointerLeave() {
@@ -522,7 +537,6 @@ function onGlobalPointerMove(e) {
     }
 }
 function onGlobalPointerUp() {
-    // si se suelta fuera del mapa, cerrar limpio
     if (isDrawing) {
         pushAll();
         isDrawing = false;
@@ -565,18 +579,15 @@ function onDown(ev) {
     currentLine._firebaseId = id;
     drawnItems.addLayer(currentLine);
     lastUpdate = 0;
+    lastMoveLL = start;
+    lastMoveTs = Date.now();
 }
 
 function onMove(ev) {
     if (mode !== 'pencil') return;
     if (!isDrawing || !currentLine) return;
 
-    // si el puntero entra en UI, cortar ya
-    if (isOverUI(ev)) {
-        finishOrCancelStroke();
-        swallowNext(260);
-        return;
-    }
+    if (isOverUI(ev)) { finishOrCancelStroke(); swallowNext(260); return; }
 
     const ll = ev.latlng || map.mouseEventToLatLng(ev.originalEvent);
     if (!ll) return;
@@ -584,6 +595,15 @@ function onMove(ev) {
     L.DomEvent.preventDefault(ev.originalEvent || ev);
     currentLine.addLatLng(ll);
     points.push(ll);
+
+    // Throttle adaptativo según velocidad
+    const now = Date.now();
+    if (lastMoveLL && lastMoveTs) {
+        dynamicUpdateEveryMs = calcAdaptiveInterval(lastMoveLL, ll, now - lastMoveTs);
+    }
+    lastMoveLL = ll;
+    lastMoveTs = now;
+
     maybePush();
 }
 
@@ -599,18 +619,22 @@ function onUp(ev) {
     points = [];
 }
 
-const geoPointArray = () =>
-    points.map(ll => new firebase.firestore.GeoPoint(ll.lat, ll.lng));
+const geoPointArrayFrom = (latlngs) =>
+    latlngs.map(ll => new firebase.firestore.GeoPoint(ll.lat, ll.lng));
 
 function pushAll() {
     if (!currentRef) return;
-    currentRef.set({ points: geoPointArray(), updatedAt: Date.now() }, { merge: true });
+    const simplified = simplifyLatLngsByMeters(points, 3); // tolerancia 3 m
+    const payload = { points: geoPointArrayFrom(simplified), updatedAt: Date.now() };
+    currentRef.set(payload, { merge: true });
 }
+
 function maybePush() {
     const now = Date.now();
-    if (!currentRef || now - lastUpdate < UPDATE_EVERY_MS) return;
+    if (!currentRef || now - lastUpdate < dynamicUpdateEveryMs) return;
     lastUpdate = now;
-    const payload = { points: geoPointArray(), updatedAt: now };
+    const simplified = simplifyLatLngsByMeters(points, 3);
+    const payload = { points: geoPointArrayFrom(simplified), updatedAt: now };
     currentRef.update(payload).catch(() => currentRef.set(payload, { merge: true }));
 }
 
@@ -678,7 +702,6 @@ function disableEraser() {
     lastEraseTs = 0;
 }
 
-/* ----- Pointer Events ----- */
 function onEraseDown(e) {
     if (mode !== 'eraser') return;
     if (!eraseShouldStart(e)) return;
@@ -701,7 +724,6 @@ function onEraseUp(e) {
     erasingDrag = false;
 }
 
-/* ----- Fallback Mouse ----- */
 function onEraseMouseDown(e) {
     if (mode !== 'eraser') return;
     if (e.originalEvent?.button !== undefined && e.originalEvent.button !== 0) return;
@@ -725,7 +747,6 @@ function onEraseMouseUp(e) {
     erasingDrag = false;
 }
 
-/* ----- Utilidades de goma ----- */
 function eraseShouldStart(e) {
     const src = e.originalEvent?.target;
     if (src && (src.closest('.leaflet-control') || src.closest('.leaflet-bar') || src.closest('.pencil-wrapper'))) return false;
@@ -803,7 +824,6 @@ function distPointToSegment(P, A, B) {
       color:#fff!important;
       box-shadow:0 0 0 2px rgba(37,99,235,.25);
     }
-    /* Si querés que la goma se vea distinta al lápiz */
     .pencil-wrapper .custom-eraser.active{
       background:#ef4444!important;
       color:#fff!important;

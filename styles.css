@@ -56,14 +56,6 @@ body {
 /* ============================
    Marco decorativo
 ============================ */
-#blood-frame {
-  position: absolute;
-  inset: 0;
-  pointer-events: none !important;
-  background: url('marco.png') no-repeat center / cover;
-  z-index: var(--z-blood);
-  opacity: .2;
-}
 
 /* ============================
    Panel inferior

@@ -36,7 +36,6 @@ function flashBtn(btn, ok = true, ms = 1100) {
 }
 
 /* -------- Abrir Street View (app si es posible) ------- */
-// --- reemplazar ---
 function buildMapsUrls(lat, lng) {
     const latS = fmt(lat), lngS = fmt(lng);
     return {
@@ -46,7 +45,6 @@ function buildMapsUrls(lat, lng) {
         androidIntent: `intent://maps.google.com/maps?layer=c&cbll=${latS},${lngS}#Intent;scheme=https;package=com.google.android.apps.maps;end`
     };
 }
-
 function openStreetViewPreferApp(lat, lng) {
     const { webStreetView, iosStreetView, androidStreetView, androidIntent } = buildMapsUrls(lat, lng);
     const ua = navigator.userAgent || '';
@@ -55,17 +53,13 @@ function openStreetViewPreferApp(lat, lng) {
     const isMobile = isAndroid || isiOS;
 
     if (isMobile) {
-        // 1) intento “silencioso” con iframe oculto (no cambia la URL ni el historial)
-        const deepLink = isAndroid ? androidStreetView : iosStreetView;
         try {
             const iframe = document.createElement('iframe');
             iframe.style.display = 'none';
-            iframe.src = deepLink;
+            iframe.src = isAndroid ? androidStreetView : iosStreetView;
             document.body.appendChild(iframe);
             setTimeout(() => { try { document.body.removeChild(iframe); } catch { } }, 1500);
-        } catch { /* no-op */ }
-
-        // 2) segundo intento sólo Android con intent:// (algunos navegadores lo requieren)
+        } catch { }
         if (isAndroid) {
             try {
                 const a = document.createElement('a');
@@ -74,15 +68,11 @@ function openStreetViewPreferApp(lat, lng) {
                 document.body.appendChild(a);
                 a.click();
                 setTimeout(() => { try { a.remove(); } catch { } }, 0);
-            } catch { /* no-op */ }
+            } catch { }
         }
-
-        // 👇 clave: SIN fallback web, no tocamos window.location
         return;
     }
-
-    // Desktop: abrir Street View web en pestaña nueva, sin afectar la página del mapa
-    try { window.open(webStreetView, '_blank', 'noopener'); } catch { /* no-op */ }
+    try { window.open(webStreetView, '_blank', 'noopener'); } catch { }
 }
 
 /* -------- GeoPoint compat (v8 global o v9 modular) ---- */
@@ -216,8 +206,6 @@ function survivorApocSVG(name = '', {
     </svg>
   </div>`;
 }
-
-// Wrapper compatible con el resto del código
 function makeSurvivorIcon(name, colorOrOpts) {
     const opts = (typeof colorOrOpts === 'string') ? { jacket: colorOrOpts } : (colorOrOpts || {});
     const html = survivorApocSVG(name || '', opts);
@@ -231,7 +219,6 @@ function makeSurvivorIcon(name, colorOrOpts) {
         popupAnchor: [0, -Math.round(H * 0.65)]
     });
 }
-
 function escapeHtml(str) {
     return String(str || '')
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -327,8 +314,6 @@ function fmtMeters(m) { if (!isFinite(m)) return '0 m'; return (m < 1000) ? `${M
 /* ======================================================
    Rendimiento / Auto-pan / Simplificación
 ====================================================== */
-const EDGE_PX = 50;
-const PAN_STEP_PX = 40;
 const PAN_THROTTLE_MS = 40;
 let lastPanTs = 0;
 
@@ -344,7 +329,6 @@ function simplifyLatLngs(latlngs, tolMeters) {
     const epsPx = Math.max(0.5, tolMeters / mpp);
     const pts = latlngs.map(ll => map.latLngToLayerPoint(ll));
 
-    // Ramer–Douglas–Peucker iterativo (proyección perpendicular correcta)
     const rdpSimplify = (arr, eps) => {
         if (arr.length <= 2) return arr.slice();
         const stack = [[0, arr.length - 1]];
@@ -392,11 +376,11 @@ function maybeAutoPan(ll) {
     const { x: w, y: h } = map.getSize();
     let dx = 0, dy = 0;
     const EDGE_PX = 50;
-    const PAN_STEP_PX_LOCAL = 40;
-    if (cpt.x < EDGE_PX) dx = -PAN_STEP_PX_LOCAL;
-    else if (cpt.x > w - EDGE_PX) dx = PAN_STEP_PX_LOCAL;
-    if (cpt.y < EDGE_PX) dy = -PAN_STEP_PX_LOCAL;
-    else if (cpt.y > h - EDGE_PX) dy = PAN_STEP_PX_LOCAL;
+    const PAN_STEP_PX = 40;
+    if (cpt.x < EDGE_PX) dx = -PAN_STEP_PX;
+    else if (cpt.x > w - EDGE_PX) dx = PAN_STEP_PX;
+    if (cpt.y < EDGE_PX) dy = -PAN_STEP_PX;
+    else if (cpt.y > h - EDGE_PX) dy = PAN_STEP_PX;
     if (dx || dy) { map.panBy([dx, dy], { animate: false }); lastPanTs = now; }
 }
 
@@ -504,7 +488,7 @@ const renderCharacter = (doc) => {
         marker.on('click', stopAndDeactivate);
         marker.on('touchstart', stopAndDeactivate);
 
-        // ----- dragstart
+        // dragstart
         marker.on('dragstart', (e) => {
             deactivateDrawingTools();
             window.__CHAR_IS_DRAGGING = true;
@@ -555,7 +539,7 @@ const renderCharacter = (doc) => {
             notifyGeocoderMove(id, startLL);
         });
 
-        // ----- drag (move)
+        // drag (move)
         marker.on('drag', (e) => {
             window.__CHAR_DRAG_TS__ = Date.now();
 
@@ -625,7 +609,7 @@ const renderCharacter = (doc) => {
             }
         });
 
-        // ----- dragend
+        // dragend
         marker.on('dragend', ({ target }) => {
             marker._snapActive = false;
             marker._snappingGuard = false;
@@ -695,21 +679,17 @@ const renderCharacter = (doc) => {
             markers[id].setIcon(makeSurvivorIcon(desiredName, desiredColor));
             markerState[id] = { name: desiredName, color: desiredColor };
         }
-
         try {
             const ll = markers[id].getLatLng?.();
             if (ll) notifyGeocoderMove(id, ll);
         } catch { }
-
         publishToGeocoder();
     }
 
     // ===== Modal borrar personaje (con pass 456) =====
     let charDeleteModal = null;
-
     function openDeleteCharacterModal(id) {
         closeDeleteCharacterModal();
-
         const mapEl = map.getContainer();
         const backdrop = document.createElement('div');
         backdrop.className = 'notes-modal-backdrop';
@@ -763,17 +743,17 @@ const renderCharacter = (doc) => {
 
         charDeleteModal = backdrop;
     }
-
     function closeDeleteCharacterModal() {
         try { charDeleteModal?.remove(); } catch { }
         charDeleteModal = null;
     }
 
     // entrada en la lista (sin botón Seguir)
+    const idEl = `entry-${id}`;
     if (!characterEntries[id]) {
         const entry = document.createElement('div');
         entry.className = 'character-entry';
-        entry.id = `entry-${id}`;
+        entry.id = idEl;
         entry.innerHTML = `
       <span>${escapeHtml(desiredName)}</span>
       <button data-action="locate" data-id="${id}" title="Centrar">📍</button>
@@ -840,59 +820,132 @@ document.getElementById('add-button')?.addEventListener('click', () => {
 });
 
 /* ======================================================
-   Firestore listeners
+   🔁 CHARACTERS: suscripción PAUSABLE + rehidratación
 ====================================================== */
-charactersRef.onSnapshot((snap) => {
-    snap.docChanges().forEach((ch) => {
-        const { id } = ch.doc;
-        if (ch.type === 'added' || ch.type === 'modified') renderCharacter(ch.doc);
-        if (ch.type === 'removed') {
-            if (markers[id]) { removeMarkerFromMapOrCluster(markers[id]); delete markers[id]; }
-            if (characterEntries[id]) { characterEntries[id].remove(); delete characterEntries[id]; }
-            trailsRef.doc(id).delete().catch(() => { });
-            delete markerState[id];
-            publishToGeocoder();
-        }
-    });
-});
-trailsRef.onSnapshot((snap) => {
-    snap.docChanges().forEach((ch) => {
-        const id = ch.doc.id;
-        const d = ch.doc.data() || {};
-        if (d.clientId === CLIENT_ID) return;
+function applyCharacterChange(ch) {
+    const id = ch.doc.id;
+    if (ch.type === 'added' || ch.type === 'modified') {
+        renderCharacter(ch.doc);
+    } else if (ch.type === 'removed') {
+        if (markers[id]) { removeMarkerFromMapOrCluster(markers[id]); delete markers[id]; }
+        if (characterEntries[id]) { characterEntries[id].remove(); delete characterEntries[id]; }
+        trailsRef.doc(id).delete().catch(() => { });
+        delete markerState[id];
+        publishToGeocoder();
+    }
+}
 
-        if (ch.type === 'removed') {
-            if (remoteTrails[id]?.poly) { map.removeLayer(remoteTrails[id].poly); delete remoteTrails[id]; }
-            return;
-        }
-        const pts = fromGeoPoints(d.points);
-        if (!pts.length && d.end) {
-            if (remoteTrails[id]?.poly) map.removeLayer(remoteTrails[id].poly);
-            delete remoteTrails[id];
-            return;
-        }
-        let rt = remoteTrails[id];
-        if (!rt?.poly) { rt = remoteTrails[id] = { poly: makePolyline({ color: d.color || '#000' }), fadeTimer: null }; map.addLayer(rt.poly); }
-        rt.poly.setLatLngs(pts);
-        rt.poly.setStyle({ color: d.color || '#000', opacity: 0.85 });
+let charactersUnsub = null;
+async function primeCharactersOnce() {
+    try {
+        const snap = await charactersRef.get();
+        snap.forEach(doc => renderCharacter(doc));
+        publishToGeocoder();
+    } catch (e) { console.warn('[characters] prime error:', e); }
+}
+function subscribeCharacters() {
+    if (charactersUnsub) return;
+    charactersUnsub = charactersRef.onSnapshot(
+        (snap) => snap.docChanges().forEach(applyCharacterChange),
+        (err) => console.warn('[characters] snapshot error:', err)
+    );
+}
+function unsubscribeCharactersIfAny() {
+    try { charactersUnsub?.(); } catch { }
+    charactersUnsub = null;
+}
 
-        if (d.end) {
-            if (rt.fadeTimer) clearInterval(rt.fadeTimer);
-            const poly = rt.poly;
-            const baseOpacity = poly.options.opacity ?? 0.85;
-            let step = 0;
-            const tickMs = Math.max(16, Math.floor(TRAIL_FADE_MS / TRAIL_FADE_STEPS));
-            rt.fadeTimer = setInterval(() => {
-                step++;
-                poly.setStyle({ opacity: baseOpacity * (1 - step / TRAIL_FADE_STEPS) });
-                if (step >= TRAIL_FADE_STEPS) {
-                    clearInterval(rt.fadeTimer);
-                    map.removeLayer(poly);
-                    delete remoteTrails[id];
-                }
-            }, tickMs);
-        }
-    });
+/* ======================================================
+   🧭 TRAILS: suscripción PAUSABLE + rehidratación
+====================================================== */
+function applyTrailChange(ch) {
+    const id = ch.doc.id;
+    const d = ch.doc.data() || {};
+    if (d.clientId === CLIENT_ID) return;
+
+    if (ch.type === 'removed') {
+        if (remoteTrails[id]?.poly) { map.removeLayer(remoteTrails[id].poly); delete remoteTrails[id]; }
+        return;
+    }
+    const pts = fromGeoPoints(d.points);
+    if (!pts.length && d.end) {
+        if (remoteTrails[id]?.poly) map.removeLayer(remoteTrails[id].poly);
+        delete remoteTrails[id];
+        return;
+    }
+    let rt = remoteTrails[id];
+    if (!rt?.poly) {
+        rt = remoteTrails[id] = { poly: makePolyline({ color: d.color || '#000' }), fadeTimer: null };
+        map.addLayer(rt.poly);
+    }
+    rt.poly.setLatLngs(pts);
+    rt.poly.setStyle({ color: d.color || '#000', opacity: 0.85 });
+
+    if (d.end) {
+        if (rt.fadeTimer) clearInterval(rt.fadeTimer);
+        const poly = rt.poly;
+        const baseOpacity = poly.options.opacity ?? 0.85;
+        let step = 0;
+        const tickMs = Math.max(16, Math.floor(TRAIL_FADE_MS / TRAIL_FADE_STEPS));
+        rt.fadeTimer = setInterval(() => {
+            step++;
+            poly.setStyle({ opacity: baseOpacity * (1 - step / TRAIL_FADE_STEPS) });
+            if (step >= TRAIL_FADE_STEPS) {
+                clearInterval(rt.fadeTimer);
+                map.removeLayer(poly);
+                delete remoteTrails[id];
+            }
+        }, tickMs);
+    }
+}
+
+let trailsUnsub = null;
+async function primeTrailsOnce() {
+    try {
+        const snap = await trailsRef.get();
+        snap.forEach(doc => {
+            // Simulamos un "modified" para reutilizar la misma ruta
+            applyTrailChange({ type: 'modified', doc });
+        });
+    } catch (e) { console.warn('[trails] prime error:', e); }
+}
+function subscribeTrails() {
+    if (trailsUnsub) return;
+    trailsUnsub = trailsRef.onSnapshot(
+        (snap) => snap.docChanges().forEach(applyTrailChange),
+        (err) => console.warn('[trails] snapshot error:', err)
+    );
+}
+function unsubscribeTrailsIfAny() {
+    try { trailsUnsub?.(); } catch { }
+    trailsUnsub = null;
+}
+
+/* ======================================================
+   Ciclo de vida (arranque + background/foreground)
+====================================================== */
+async function startLive() {
+    // Rehidratamos estado actual y luego nos suscribimos
+    await Promise.allSettled([primeCharactersOnce(), primeTrailsOnce()]);
+    subscribeCharacters();
+    subscribeTrails();
+}
+function stopLive() {
+    unsubscribeCharactersIfAny();
+    unsubscribeTrailsIfAny();
+}
+
+// Arranca (si la pestaña ya está visible)
+if (document.visibilityState === 'visible') {
+    startLive();
+}
+// Manejar cambios de visibilidad
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        stopLive();
+    } else {
+        startLive(); // rehidrata y reanuda
+    }
 });
 
 /* ======================================================

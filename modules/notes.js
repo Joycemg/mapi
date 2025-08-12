@@ -4,6 +4,7 @@
 // Anti-deriva: modal dentro del contenedor del mapa + L.Icon (SVG data URL, anchor fijo). Pane propio.
 // Mejoras: cache de íconos, batch de snapshot con rAF, render condicional, orden por cercanía a la vista.
 // Integración: toolsBus (exclusividad). Tools: "notes" (modo crear), "notes-list" (lista), "notes-edit" (acción momentánea).
+// Nuevo: Suscripción pausable por visibilidad + rehidratación desde localStorage con TTL.
 
 import { map } from './Map.js';
 import { db } from '../config/firebase.js';
@@ -40,7 +41,7 @@ let noteMode = false;
 let noteBtn = null;
 const markers = new Map();     // id -> L.marker
 const notesData = new Map();   // id -> data
-let unsub = null;
+let unsub = null;              // suscripción Firestore activa
 
 // creación/edición/borrado
 let creationModal = null;
@@ -590,6 +591,9 @@ function openEditModal(id, data) {
             closeEditModal();
             try { m?.openPopup(); } catch { }
             if (listOpen) renderListDebounced();
+
+            // cache
+            updateCache(id, updated);
         } catch (err) {
             console.error('[notes] update error:', err);
             toast('No se pudo actualizar', 'error');
@@ -709,7 +713,6 @@ function viewHtml(d) {
   </div>`;
 }
 
-
 function attachDelegatedHandlers(root, marker, id, data, popup) {
     if (root.__delegatedBound) return;
     root.__delegatedBound = true;
@@ -761,6 +764,7 @@ function attachDelegatedHandlers(root, marker, id, data, popup) {
                 marker.openPopup();
                 toast('Título actualizado');
                 if (listOpen) renderListDebounced();
+                updateCache(id, data);
             } catch (err) { console.error('[notes] quick title update error:', err); toast('No se pudo actualizar', 'error'); }
         };
         input.addEventListener('blur', commit, { once: true });
@@ -805,7 +809,7 @@ function openNote(id) {
     map.flyTo(ll, z, { animate: true, duration: .6 });
 }
 
-/* ================= Render (solo snapshot) ================= */
+/* ================= Render (solo snapshot/cache) ================= */
 function shallowEqPos(a, b) { return a && b && a.lat === b.lat && a.lng === b.lng; }
 function renderOrUpdate(id, data) {
     if (typeof data?.lat !== 'number' || typeof data?.lng !== 'number') return;
@@ -837,6 +841,9 @@ function renderOrUpdate(id, data) {
         }
     }
 
+    // cache local
+    updateCache(id, data);
+
     if (listOpen) renderListDebounced();
 }
 function removeMarker(id) {
@@ -847,6 +854,10 @@ function removeMarker(id) {
     }
     markers.delete(id);
     notesData.delete(id);
+
+    // cache local
+    removeFromCache(id);
+
     if (listOpen) renderListDebounced();
 }
 async function safeDeleteNote(id) {
@@ -883,8 +894,10 @@ function flushPending() {
         else renderOrUpdate(id, rec.data);
     }
 }
-function startRealtime() {
-    try { unsub?.(); } catch { }
+
+/* ======= Suscripción pausable ======= */
+function subscribeNotes() {
+    if (unsub) return;
     try {
         unsub = notesRef().onSnapshot((snap) => {
             snap.docChanges().forEach((ch) => {
@@ -892,13 +905,101 @@ function startRealtime() {
                 if (ch.type === 'removed') {
                     pending.set(id, { type: 'removed' });
                 } else {
-                    pending.set(id, { type: 'upsert', data: ch.doc.data() });
+                    const data = ch.doc.data();
+                    pending.set(id, { type: 'upsert', data });
                 }
             });
             scheduleFlush();
         }, (err) => console.error('[notes] snapshot error:', err));
     } catch (e) {
         console.error('[notes] No se pudo iniciar onSnapshot:', e);
+    }
+}
+function unsubscribeNotes() {
+    try { unsub?.(); } catch { }
+    unsub = null;
+}
+
+/* ======= Cache local (rehidratación) ======= */
+const NOTES_CACHE_KEY = 'notes_cache_v2';
+const NOTES_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 días
+let cacheDirty = false;
+const persistCacheDebounced = debounce(persistCache, 500);
+
+function readCache() {
+    try {
+        const raw = localStorage.getItem(NOTES_CACHE_KEY);
+        if (!raw) return {};
+        const obj = JSON.parse(raw);
+        // prune por TTL
+        const now = Date.now();
+        const pruned = {};
+        for (const [id, d] of Object.entries(obj)) {
+            if (d && typeof d.updatedAt === 'number' && (now - d.updatedAt) <= NOTES_CACHE_TTL_MS) {
+                pruned[id] = d;
+            }
+        }
+        if (Object.keys(pruned).length !== Object.keys(obj).length) {
+            localStorage.setItem(NOTES_CACHE_KEY, JSON.stringify(pruned));
+        }
+        return pruned;
+    } catch { return {}; }
+}
+
+function writeCache(obj) {
+    try { localStorage.setItem(NOTES_CACHE_KEY, JSON.stringify(obj)); } catch { }
+}
+
+function normalizeDocForCache(d = {}) {
+    return {
+        title: d.title || 'Nota',
+        body: d.body || '',
+        iconType: d.iconType || 'note',
+        color: d.color || '#000000',
+        lat: Number(d.lat),
+        lng: Number(d.lng),
+        updatedAt: tsToMs(d.updatedAt) || tsToMs(d.createdAt) || Date.now()
+    };
+}
+
+function updateCache(id, data) {
+    if (!id) return;
+    const obj = readCache();
+    obj[id] = normalizeDocForCache(data);
+    cacheDirty = true;
+    persistCacheDebounced();
+}
+
+function removeFromCache(id) {
+    const obj = readCache();
+    if (obj[id]) {
+        delete obj[id];
+        cacheDirty = true;
+        persistCacheDebounced();
+    }
+}
+
+function persistCache() {
+    if (!cacheDirty) return;
+    cacheDirty = false;
+    try {
+        const obj = {};
+        for (const [id, d] of notesData.entries()) {
+            obj[id] = normalizeDocForCache(d);
+        }
+        writeCache(obj);
+    } catch { }
+}
+
+function hydrateFromCache() {
+    const obj = readCache();
+    const entries = Object.entries(obj);
+    if (!entries.length) return;
+    // Render rápido sin esperar snapshot:
+    for (const [id, d] of entries) {
+        if (isFinite(d.lat) && isFinite(d.lng)) {
+            renderOrUpdate(id, d);
+        }
     }
 }
 
@@ -908,7 +1009,27 @@ function init() {
     ensureNotesPane();
     map.addControl(new NotesControl());
     map.addControl(new NotesListControl());
-    startRealtime();
+
+    // 1) Pintar desde cache inmediatamente (rehidratación instantánea)
+    hydrateFromCache();
+
+    // 2) Suscripción en vivo
+    subscribeNotes();
+
+    // 3) Pausable por visibilidad (ahorra lecturas/costo)
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            unsubscribeNotes();
+            persistCacheDebounced();
+        } else {
+            if (notesData.size === 0 && markers.size === 0) hydrateFromCache();
+            subscribeNotes();
+        }
+    });
+
+    // 4) Persistir cache al salir
+    window.addEventListener('beforeunload', persistCache);
+    window.addEventListener('pagehide', persistCache);
 
     // ====== Registro en el bus ======
     try {
@@ -931,7 +1052,7 @@ function init() {
         // Edición/Borrado (momentáneo): apaga otras tools y si cambia de tool, cierra modales
         registerTool('notes-edit', {
             sticky: false,
-            enable: () => { }, // no hace falta, abrimos los modales explícitamente
+            enable: () => { }, // abrimos los modales explícitamente
             disable: () => { closeEditModal(); closeDeleteModal(); }
         });
     } catch (e) {

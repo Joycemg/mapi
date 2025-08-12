@@ -1,50 +1,43 @@
 // modules/Map.js
-// Leaflet + capa base única: CARTO Positron.
-// Móvil: límites de zoom, pellizco centrado, resize/orientación robusto,
-// interacción táctil ajustada, prefetch pausado fuera de vista, aware de conexión
-// y pantalla completa nativa + MODO PINCH-ZOOM DEL NAVEGADOR cuando se alcanza MAX_ZOOM.
+// Mapa Leaflet con mejoras de rendimiento/UX y vector opcional con idioma ES.
 
 let map = window.__APP_MAP__ || null;
 export { map };
 
 /* ===== Service Worker (no bloqueante) ===== */
 if ("serviceWorker" in navigator) {
-    try {
-        navigator.serviceWorker.register("/sw.js").catch(() => { });
-    } catch { }
+    try { navigator.serviceWorker.register("/sw.js").catch(() => { }); } catch { }
 }
 
 (() => {
     if (map) return;
 
-    /* ===== Utilidades / entorno ===== */
-    const isMobileUA = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const prefersReducedMotion =
-        typeof matchMedia === "function" &&
-        matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const dpr = window.devicePixelRatio || 1;
-
-    // Info de red (aware de conexión)
-    const conn =
-        navigator.connection ||
-        navigator.webkitConnection ||
-        navigator.mozConnection;
+    /* ===== Entorno / capacidades ===== */
+    const UA_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const PREFERS_REDUCED = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const DPR = window.devicePixelRatio || 1;
+    const conn = navigator.connection || navigator.webkitConnection || navigator.mozConnection;
     const SAVE_DATA = !!(conn && (conn.saveData || /2g/.test(conn.effectiveType || "")));
-
-    // Pantallas muy chicas: baja zoom inicial
-    const tinyScreen =
-        Math.min(window.innerWidth, window.innerHeight) < 360;
+    const DEV_MEM_GB = Number(navigator.deviceMemory || 4);
+    const tinyScreen = Math.min(window.innerWidth, window.innerHeight) < 360;
 
     /* ===== Constantes ===== */
     const MAP_ELEMENT_ID = "map";
-    const WORLD_BOUNDS = L.latLngBounds(
-        L.latLng(-85, -180),
-        L.latLng(85, 180)
-    );
+    const WORLD_BOUNDS = L.latLngBounds(L.latLng(-85, -180), L.latLng(85, 180));
     const DEFAULT_CENTER = [20, 0];
     const DEFAULT_ZOOM = tinyScreen ? 2 : 3;
-    const MAX_ZOOM = isMobileUA ? 18 : 18;
-    const PREFETCH_PAD_PX = Math.round(256 * (isMobileUA ? 0.75 : 1) * Math.min(dpr, 2));
+    const MAX_ZOOM = 18;
+
+    // Prefetch adaptativo (más chico si red lenta / memoria baja)
+    const PREFETCH_PAD_PX =
+        Math.round(
+            256 *
+            (UA_MOBILE ? 0.7 : 1) *
+            Math.min(DPR, 2) *
+            (SAVE_DATA ? 0.6 : 1) *
+            (DEV_MEM_GB < 4 ? 0.75 : 1)
+        );
+
     const TOUCH_DOUBLE_TAP_MS = 350;
 
     /* ===== Hot reload limpio ===== */
@@ -69,7 +62,7 @@ if ("serviceWorker" in navigator) {
         preferCanvas: true,
 
         // Interacción
-        inertia: isMobileUA,
+        inertia: UA_MOBILE,
         inertiaDeceleration: 3000,
         tap: true,
         tapTolerance: 22,
@@ -77,21 +70,46 @@ if ("serviceWorker" in navigator) {
         doubleClickZoom: false,
 
         // Animaciones
-        zoomAnimation: !prefersReducedMotion && !isMobileUA,
-        fadeAnimation: !prefersReducedMotion && !isMobileUA,
-        markerZoomAnimation: !prefersReducedMotion && !isMobileUA,
+        zoomAnimation: !PREFERS_REDUCED && !UA_MOBILE,
+        fadeAnimation: !PREFERS_REDUCED && !UA_MOBILE,
+        markerZoomAnimation: !PREFERS_REDUCED && !UA_MOBILE,
 
         // Límites del mundo
         maxBounds: WORLD_BOUNDS,
         maxBoundsViscosity: 1,
 
-        // Rueda (desktop)
+        // Rueda: la vamos a manejar nosotros (Ctrl+rueda)
+        scrollWheelZoom: false,
         wheelDebounceTime: 40,
         wheelPxPerZoomLevel: 120
     });
 
     const mapEl = map.getContainer();
     mapEl.style.touchAction = "manipulation";
+
+    /* ===== Indicador de red simple (carga de tiles) ===== */
+    const netBadge = (() => {
+        const el = document.createElement('div');
+        el.className = 'map-net-badge';
+        Object.assign(el.style, {
+            position: 'absolute', top: '8px', left: '8px', zIndex: 1200,
+            background: 'rgba(17,24,39,.85)', color: '#fff', padding: '2px 6px',
+            borderRadius: '6px', font: '12px/1 system-ui, sans-serif',
+            opacity: 0, transition: 'opacity .15s'
+        });
+        el.textContent = 'Cargando mapa…';
+        mapEl.appendChild(el);
+        let shown = false, hideTO = 0, counter = 0;
+        const show = () => {
+            counter++;
+            if (!shown) { el.style.opacity = .96; shown = true; }
+        };
+        const hide = () => {
+            counter = Math.max(0, counter - 1);
+            if (counter === 0) { clearTimeout(hideTO); hideTO = setTimeout(() => { el.style.opacity = 0; shown = false; }, 120); }
+        };
+        return { show, hide };
+    })();
 
     /* === MINI PARCHE (escucha events del toolsBus) === */
     (() => {
@@ -134,31 +152,100 @@ if ("serviceWorker" in navigator) {
     // Atribuciones
     map.attributionControl.addAttribution("© OpenStreetMap contributors");
 
-    /* ===== Opciones comunes raster (aware de conexión) ===== */
+    /* ===== Opciones comunes raster (adaptativas) ===== */
     const rasterOptions = {
         noWrap: true,
-        detectRetina: !isMobileUA && !SAVE_DATA,
+        detectRetina: !UA_MOBILE && !SAVE_DATA,
         crossOrigin: "anonymous",
         updateWhenIdle: true,
         updateWhenZooming: true,
-        keepBuffer: isMobileUA ? 1 : 2,
+        keepBuffer: UA_MOBILE ? (DEV_MEM_GB < 4 ? 0 : 1) : (DEV_MEM_GB < 4 ? 1 : 2),
         className: "filtered-tile",
         maxZoom: MAX_ZOOM,
         maxNativeZoom: SAVE_DATA ? Math.min(17, MAX_ZOOM) : Math.min(18, MAX_ZOOM),
-        errorTileUrl:
-            "data:image/gif;base64,R0lGODlhAQABAIABAP///wAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+        errorTileUrl: "data:image/gif;base64,R0lGODlhAQABAIABAP///wAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
     };
 
-    /* ===== Capa base única: CARTO Positron ===== */
-    const cartoPositron = L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-        {
-            ...rasterOptions,
-            subdomains: "abcd",
-            attribution: "© OpenStreetMap contributors · © CARTO"
-        }
-    );
+    /* ===== Base: Raster Positron por defecto ===== */
+    const positronUrl = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
+    const cartoPositron = L.tileLayer(positronUrl, { ...rasterOptions, subdomains: "abcd", attribution: "© OpenStreetMap contributors · © CARTO" });
+
+    // Reintentos suaves para mosaicos (mejor UX en redes flojas)
+    const hookTileLayer = (tl) => {
+        tl.on('loading', () => netBadge.show());
+        tl.on('load', () => netBadge.hide());
+        tl.on('tileerror', (e) => {
+            // Reintento 1x tras 800ms (no spamear)
+            const img = e.tile;
+            if (img && !img.dataset.__retried) {
+                img.dataset.__retried = '1';
+                setTimeout(() => { img.src = e.url; }, 800);
+            }
+        });
+    };
     cartoPositron.addTo(map);
+    hookTileLayer(cartoPositron);
+
+    /* ===== Vector opcional (MapLibre + idioma ES) =====
+       Requiere que hayas cargado:
+       - maplibre-gl, leaflet-maplibre-gl y openmaptiles-language en index.html
+       - window.__MAPTILER_KEY__ = '...'
+       Si existen, montamos vector encima y forzamos etiquetas en español.
+    */
+    (function maybeEnableVector() {
+        const key = window.__MAPTILER_KEY__;
+        const hasML = !!(window.maplibregl && L.maplibreGL);
+        if (!key || !hasML) return;
+
+        const styleUrl = `https://api.maptiler.com/maps/streets-v2/style.json?key=${key}`;
+
+        // Insertamos capa GL en Leaflet (queda sobre Positron; podrías quitar Positron si quieres solo vector)
+        const glLayer = L.maplibreGL({ style: styleUrl, interactive: false }).addTo(map);
+
+        const ml = glLayer.getMaplibreMap();
+        const applyLang = () => {
+            try {
+                // Si está el plugin, forzamos español. Si no, tratamos de ajustar el layout property.
+                if (window.MapLibreLanguage) {
+                    ml.addControl(new MapLibreLanguage({ defaultLanguage: 'es' }));
+                } else {
+                    // Fallback manual: cambia text-field de capas de labels conocidas
+                    const style = ml.getStyle();
+                    (style.layers || []).forEach(ly => {
+                        if (!ly.layout || !/text-field/.test(Object.keys(ly.layout))) return;
+                        try {
+                            ml.setLayoutProperty(ly.id, 'text-field', [
+                                'coalesce',
+                                ['get', 'name:es'],
+                                ['get', 'name:es-Latn'],
+                                ['get', 'name'],
+                            ]);
+                        } catch { }
+                    });
+                }
+            } catch { }
+        };
+        ml.on('styledata', applyLang);
+        applyLang();
+
+        // Mostrar también el badge de red cuando vector esté cargando fuentes/tiles
+        ml.on('sourcedata', (e) => {
+            if (e.isSourceLoaded === false) netBadge.show();
+            if (e.isSourceLoaded === true) netBadge.hide();
+        });
+
+        // API pública para cambiar idioma más tarde, si lo necesitas
+        window.setVectorLanguage = (lang = 'es') => {
+            try {
+                if (window.MapLibreLanguage) {
+                    // remover y volver a agregar para aplicar nuevo default
+                    const ctrls = (ml._controls || []).filter(c => c instanceof MapLibreLanguage);
+                    ctrls.forEach(c => ml.removeControl(c));
+                    ml.addControl(new MapLibreLanguage({ defaultLanguage: lang }));
+                }
+            } catch { }
+        };
+    })();
 
     /* ===== Controles ===== */
     L.control.scale({ imperial: false }).addTo(map);
@@ -181,7 +268,7 @@ if ("serviceWorker" in navigator) {
     });
     function onResetClick(e) {
         e.preventDefault();
-        map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: !prefersReducedMotion });
+        map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: !PREFERS_REDUCED });
     }
     map.addControl(new ResetViewControl());
 
@@ -211,17 +298,15 @@ if ("serviceWorker" in navigator) {
     function onFullscreenChange() { invalidateNow(false); updatePinchZoomMode(); }
     map.addControl(new FullscreenControl());
 
-    /* ===== Día / Tarde / Noche (compacto, botones + slider al lado) ===== */
+    /* ===== Filtro Día / Tarde / Noche (igual a tu versión) ===== */
     (function installTimeOfDayControl() {
         const tilePane = map.getPane('tilePane');
 
-        // Presets con tintes: tarde más rojiza, noche azulada fuerte
         const PRESET_PARAMS = {
             day: { b: 1.00, c: 1.00, sep: 0.00, sat: 1.00, hue: 0 },
-            dusk: { b: 0.82, c: 1.15, sep: 0.55, sat: 1.25, hue: -12 }, // rojiza
-            night: { b: 0.42, c: 1.20, sep: 0.00, sat: 1.40, hue: 190 }  // azulado
+            dusk: { b: 0.82, c: 1.15, sep: 0.55, sat: 1.25, hue: -12 },
+            night: { b: 0.42, c: 1.20, sep: 0.00, sat: 1.40, hue: 190 }
         };
-
         const clamp01 = (x) => Math.max(0, Math.min(1, x));
         function buildFilter(presetKey, t) {
             const p = PRESET_PARAMS[presetKey] || PRESET_PARAMS.day;
@@ -233,10 +318,7 @@ if ("serviceWorker" in navigator) {
             const hue = Math.round(p.hue * t);
             return `brightness(${b}) contrast(${c}) sepia(${sep}%) saturate(${sat}) hue-rotate(${hue}deg)`;
         }
-
-        // Intensidad por preset (editable con el slider por cada preset)
         const intensityBy = { day: 0.00, dusk: 0.70, night: 1.00 };
-
         let current = 'day';
         function apply() {
             if (!tilePane) return;
@@ -252,26 +334,13 @@ if ("serviceWorker" in navigator) {
                 L.DomEvent.disableScrollPropagation(wrap);
 
                 const box = L.DomUtil.create('div', '', wrap);
-                Object.assign(box.style, {
-                    background: '#fff',
-                    padding: '2px'
-                });
+                Object.assign(box.style, { background: '#fff', padding: '2px' });
 
-                // Contenedor único con DOS columnas: izquierda botones (vertical), derecha slider (vertical)
                 const group = L.DomUtil.create('div', '', box);
-                Object.assign(group.style, {
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                });
+                Object.assign(group.style, { display: 'flex', alignItems: 'center', gap: '4px' });
 
-                // Columna de botones (vertical)
                 const btnCol = L.DomUtil.create('div', '', group);
-                Object.assign(btnCol.style, {
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '2px'
-                });
+                Object.assign(btnCol.style, { display: 'flex', flexDirection: 'column', gap: '2px' });
 
                 const BTN_H = 22;
                 const makeBtn = (k, label) => {
@@ -316,38 +385,29 @@ if ("serviceWorker" in navigator) {
                     }
                 }
 
-                // Columna del slider (vertical)
                 const sliderCol = L.DomUtil.create('div', '', group);
-                Object.assign(sliderCol.style, {
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '22px',
-                    height: '100%'
-                });
+                Object.assign(sliderCol.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '100%' });
 
                 const slider = L.DomUtil.create('input', '', sliderCol);
                 slider.type = 'range'; slider.min = '0'; slider.max = '100'; slider.step = '1';
                 slider.value = String(Math.round((intensityBy[current] ?? 0) * 100));
                 Object.assign(slider.style, {
-                    transform: 'rotate(-90deg)',
-                    transformOrigin: '50% 50%',
+                    transform: 'rotate(-90deg)', transformOrigin: '50% 50%',
                     appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
                     width: '84px', height: '18px', margin: '0', outline: 'none'
                 });
 
-                // Estilos del slider (mini)
                 const styleId = 'tod-vertical-slider-style-tiny';
                 if (!document.getElementById(styleId)) {
                     const s = document.createElement('style');
                     s.id = styleId;
                     s.textContent = `
-          .tod-control.tiny input[type="range"]{background:transparent}
-          .tod-control.tiny input[type="range"]::-webkit-slider-runnable-track{height:3px;background:#e5e7eb;border-radius:999px}
-          .tod-control.tiny input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:#2563eb;margin-top:-3.5px}
-          .tod-control.tiny input[type="range"]::-moz-range-track{height:3px;background:#e5e7eb;border-radius:999px}
-          .tod-control.tiny input[type="range"]::-moz-range-thumb{width:10px;height:10px;border-radius:50%;background:#2563eb;border:0}
-        `;
+            .tod-control.tiny input[type="range"]{background:transparent}
+            .tod-control.tiny input[type="range"]::-webkit-slider-runnable-track{height:3px;background:#e5e7eb;border-radius:999px}
+            .tod-control.tiny input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:#2563eb;margin-top:-3.5px}
+            .tod-control.tiny input[type="range"]::-moz-range-track{height:3px;background:#e5e7eb;border-radius:999px}
+            .tod-control.tiny input[type="range"]::-moz-range-thumb{width:10px;height:10px;border-radius:50%;background:#2563eb;border:0}
+          `;
                     document.head.appendChild(s);
                 }
 
@@ -356,32 +416,29 @@ if ("serviceWorker" in navigator) {
                 );
                 slider.addEventListener('input', () => {
                     const t = Number(slider.value) / 100;
-                    intensityBy[current] = clamp01(t);
+                    intensityBy[current] = Math.max(0, Math.min(1, t));
                     apply();
                 });
 
-                // Ajusta el largo del slider al alto total de los botones
                 function fitSlider() {
                     requestAnimationFrame(() => {
                         const h = Math.max(70, Math.round(btnCol.getBoundingClientRect().height));
-                        slider.style.width = `${h}px`; // rotado: width == alto visual
+                        slider.style.width = `${h}px`;
                     });
                 }
 
-                // Inicial
                 markActive(current);
                 apply();
                 fitSlider();
                 window.addEventListener('resize', fitSlider, { passive: true });
                 document.addEventListener('orientationchange', () => setTimeout(fitSlider, 200), { passive: true });
 
-                // Helpers opcionales
                 window.setTimeOfDay = (k) => {
                     const ok = ['day', 'dusk', 'night'].includes(k);
                     if (ok) { current = k; markActive(k); slider.value = String(Math.round((intensityBy[current] ?? 0) * 100)); apply(); fitSlider(); }
                 };
                 window.setTimeIntensity = (t01) => {
-                    intensityBy[current] = clamp01(Number(t01) || 0);
+                    intensityBy[current] = Math.max(0, Math.min(1, Number(t01) || 0));
                     slider.value = String(Math.round(intensityBy[current] * 100));
                     apply(); fitSlider();
                 };
@@ -390,11 +447,10 @@ if ("serviceWorker" in navigator) {
             }
         });
 
-        map.addControl(new TodControl());
+        const tod = new TodControl();
+        map.addControl(tod);
+        window.__TOD_CTL__ = tod;
     })();
-
-
-
 
     /* ===== Prefetch de mosaicos (pausado si no visible) ===== */
     let mapVisible = true;
@@ -422,7 +478,6 @@ if ("serviceWorker" in navigator) {
                 map.eachLayer((layer) => {
                     if (!(layer instanceof L.TileLayer) || !map.hasLayer(layer)) return;
                     if (typeof layer._update !== "function" || typeof layer._getTiledPixelBounds !== "function") return;
-
                     const originalFn = layer._getTiledPixelBounds;
                     layer._getTiledPixelBounds = () => paddedBounds;
                     try { layer._update(); }
@@ -465,9 +520,35 @@ if ("serviceWorker" in navigator) {
     map.on("dblclick", (e) => fireCoords(e, "dblclick"));
     mapEl.addEventListener("contextmenu", preventBrowserContext, { passive: false });
 
+    /* ===== Zoom con rueda solo con Ctrl/⌘ (mejor UX en páginas largas) ===== */
+    (function installCtrlWheelZoom() {
+        let tipTO = 0;
+        const tip = document.createElement('div');
+        tip.textContent = 'Mantén Ctrl (o ⌘) para hacer zoom';
+        Object.assign(tip.style, {
+            position: 'absolute', bottom: '10px', left: '50%', transform: 'translateX(-50%)',
+            background: 'rgba(0,0,0,.75)', color: '#fff', padding: '6px 10px',
+            borderRadius: '8px', font: '12px/1 system-ui, sans-serif', opacity: 0, transition: 'opacity .15s',
+            pointerEvents: 'none', zIndex: 1200
+        });
+        mapEl.appendChild(tip);
+        const showTip = () => { clearTimeout(tipTO); tip.style.opacity = .96; tipTO = setTimeout(() => tip.style.opacity = 0, 900); };
+
+        mapEl.addEventListener('wheel', (ev) => {
+            const accelKey = ev.ctrlKey || ev.metaKey;
+            if (!accelKey) { showTip(); return; }
+            ev.preventDefault();
+            const delta = ev.deltaY;
+            const dir = delta > 0 ? -1 : 1;
+            const step = (ev.deltaMode === 1) ? 1 : 0.25;
+            const targetZoom = map.getZoom() + dir * step * 2; // un poco más “rápido”
+            map.setZoomAround(map.mouseEventToLatLng(ev), Math.max(map.getMinZoom(), Math.min(MAX_ZOOM, targetZoom)));
+        }, { passive: false });
+    })();
+
     /* ===== Pinch-zoom del navegador a MAX_ZOOM ===== */
     function updatePinchZoomMode() {
-        if (!isMobileUA) return;
+        if (!UA_MOBILE) return;
         const atMax = map.getZoom() >= MAX_ZOOM;
         if (atMax) {
             if (map.touchZoom.enabled()) map.touchZoom.disable();
@@ -544,6 +625,13 @@ if ("serviceWorker" in navigator) {
             if (window.__TOD_CTL__) {
                 try { map.removeControl(window.__TOD_CTL__); } catch { }
                 window.__TOD_CTL__ = null;
+            }
+
+            // Clima (si algún día agregas)
+            if (window.__WEATHER_CTL__) {
+                try { window.__DESTROY_WEATHER__?.(); } catch { }
+                window.__WEATHER_CTL__ = null;
+                window.__DESTROY_WEATHER__ = null;
             }
         } catch { }
     };

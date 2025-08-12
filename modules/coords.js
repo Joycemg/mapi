@@ -204,4 +204,3 @@ map.getContainer().addEventListener('touchend', async (ev) => {
 
   startPoint = null;
 }, { passive: false });
-
