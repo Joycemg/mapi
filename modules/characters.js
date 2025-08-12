@@ -36,37 +36,53 @@ function flashBtn(btn, ok = true, ms = 1100) {
 }
 
 /* -------- Abrir Street View (app si es posible) ------- */
+// --- reemplazar ---
 function buildMapsUrls(lat, lng) {
     const latS = fmt(lat), lngS = fmt(lng);
     return {
         webStreetView: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${latS},${lngS}`,
         iosStreetView: `comgooglemaps://?api=1&map_action=pano&viewpoint=${latS},${lngS}`,
-        androidStreetView: `google.streetview:cbll=${latS},${lngS}`
+        androidStreetView: `google.streetview:cbll=${latS},${lngS}`,
+        androidIntent: `intent://maps.google.com/maps?layer=c&cbll=${latS},${lngS}#Intent;scheme=https;package=com.google.android.apps.maps;end`
     };
 }
+
 function openStreetViewPreferApp(lat, lng) {
-    const { webStreetView, iosStreetView, androidStreetView } = buildMapsUrls(lat, lng);
+    const { webStreetView, iosStreetView, androidStreetView, androidIntent } = buildMapsUrls(lat, lng);
     const ua = navigator.userAgent || '';
     const isAndroid = /Android/i.test(ua);
     const isiOS = /iPhone|iPad|iPod/i.test(ua);
     const isMobile = isAndroid || isiOS;
 
     if (isMobile) {
+        // 1) intento “silencioso” con iframe oculto (no cambia la URL ni el historial)
+        const deepLink = isAndroid ? androidStreetView : iosStreetView;
         try {
-            const deep = isAndroid ? androidStreetView : iosStreetView;
-            const timer = setTimeout(() => {
-                try { window.location.href = webStreetView; } catch { window.open(webStreetView, '_blank', 'noopener'); }
-            }, 800);
-            window.location.href = deep;
-            setTimeout(() => clearTimeout(timer), 2000);
-            return;
-        } catch {
-            window.location.href = webStreetView;
-            return;
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = deepLink;
+            document.body.appendChild(iframe);
+            setTimeout(() => { try { document.body.removeChild(iframe); } catch { } }, 1500);
+        } catch { /* no-op */ }
+
+        // 2) segundo intento sólo Android con intent:// (algunos navegadores lo requieren)
+        if (isAndroid) {
+            try {
+                const a = document.createElement('a');
+                a.href = androidIntent;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => { try { a.remove(); } catch { } }, 0);
+            } catch { /* no-op */ }
         }
+
+        // 👇 clave: SIN fallback web, no tocamos window.location
+        return;
     }
 
-    try { window.open(webStreetView, '_blank', 'noopener'); } catch { window.location.href = webStreetView; }
+    // Desktop: abrir Street View web en pestaña nueva, sin afectar la página del mapa
+    try { window.open(webStreetView, '_blank', 'noopener'); } catch { /* no-op */ }
 }
 
 /* -------- GeoPoint compat (v8 global o v9 modular) ---- */
