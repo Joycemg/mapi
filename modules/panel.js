@@ -1,110 +1,201 @@
 // modules/panel.js
+// Panel inferior: arranca oculto y se abre SOLO manualmente.
+// Este archivo incluye el botón Leaflet “Pjs” (topright) para mostrar/ocultar el panel.
+// Además, cierra el panel cuando usás otras herramientas (geocoder, draw, notas) o
+// cuando interactuás con el mapa. No requiere ningún otro módulo para togglear.
 
-/** Cache local para no hacer query del DOM cada vez */
+import { map } from './Map.js';
+
+const PANEL_ID = 'panel';
+
 const panelCache = new Map();
+let mustOpenManually = true;
 
-/** Obtiene el panel, con cache. */
-function getPanel(id = 'panel') {
-    if (!id || typeof id !== 'string') return null;
-    if (panelCache.has(id)) return panelCache.get(id) || null;
-    const el = document.getElementById(id) || null;
-    if (el) panelCache.set(id, el);
+function getPanel() {
+    if (panelCache.has(PANEL_ID)) return panelCache.get(PANEL_ID) || null;
+    const el = document.getElementById(PANEL_ID) || null;
+    if (el) panelCache.set(PANEL_ID, el);
     return el;
 }
 
-/** Devuelve true si el panel está oculto (por clase). */
-export function isPanelHidden(id = 'panel') {
-    const el = getPanel(id);
-    return el ? el.classList.contains('is-hidden') : true;
+export function isPanelHidden() {
+    const el = getPanel();
+    if (!el) return true;
+    const st = getComputedStyle(el);
+    return el.classList.contains('is-hidden') || st.display === 'none' || st.visibility === 'hidden';
 }
 
-/**
- * Oculta/muestra el panel de forma idempotente.
- * @returns {boolean} visible - estado final (true si visible)
- */
-export function setPanelHidden(id = 'panel', hidden = false) {
-    const el = getPanel(id);
-    if (!el) {
-        console.warn(`[panel] No se encontró #${id}`);
-        return false;
+function scheduleLayoutInvalidate(el) {
+    const fire = () => {
+        try { window.__invalidateMap__?.(); } catch { }
+        try { document.dispatchEvent(new Event('app:layout-change')); } catch { }
+    };
+    if (el) el.addEventListener('transitionend', fire, { once: true });
+    requestAnimationFrame(() => requestAnimationFrame(fire));
+    setTimeout(fire, 350);
+}
+
+function setPanelHidden(hidden = false) {
+    const el = getPanel();
+    if (!el) { console.warn('[panel] No se encontró #panel'); return false; }
+
+    const currentlyHidden = isPanelHidden();
+    if (hidden === currentlyHidden) return !hidden;
+
+    if (hidden) {
+        el.classList.add('is-hidden');
+        el.setAttribute('aria-hidden', 'true');
+        el.style.display = 'none';
+        mustOpenManually = true;
+    } else {
+        el.classList.remove('is-hidden');
+        el.setAttribute('aria-hidden', 'false');
+        if (el.style.display === 'none') el.style.display = '';
     }
-
-    const currentlyHidden = el.classList.contains('is-hidden');
-    if (hidden === currentlyHidden) {
-        // No hay cambio; devolvemos estado actual (visible = !hidden)
-        return !hidden;
-    }
-
-    if (hidden) el.classList.add('is-hidden');
-    else el.classList.remove('is-hidden');
-
-    // Accesibilidad básica: reflejar estado en ARIA
-    el.setAttribute('aria-hidden', String(hidden));
-
-    // Notificar cambio de layout para que Leaflet recalcule tamaño
     scheduleLayoutInvalidate(el);
-
     return !hidden;
 }
 
-/** Muestra el panel. Devuelve true si quedó visible. */
-export function showPanel(id = 'panel') {
-    return setPanelHidden(id, false);
+export function showPanel(opts = {}) {
+    const { manual = false, force = false } = opts || {};
+    if (mustOpenManually && !manual && !force) return false;
+    const ok = setPanelHidden(false);
+    if (ok) mustOpenManually = false;
+    return ok;
+}
+export function hidePanel() { return !setPanelHidden(true); }
+export function togglePanel(opts = {}) {
+    return isPanelHidden() ? showPanel({ manual: opts.manual ?? true }) : hidePanel();
 }
 
-/** Oculta el panel. Devuelve false (no visible). */
-export function hidePanel(id = 'panel') {
-    return !setPanelHidden(id, true);
+function ensurePanelStartsHidden() {
+    const hideNow = (el) => {
+        if (!el) return;
+        if (!el.classList.contains('is-hidden')) el.classList.add('is-hidden');
+        el.setAttribute('aria-hidden', 'true');
+        el.style.display = 'none';
+        mustOpenManually = true;
+    };
+    let el = getPanel();
+    if (el) { hideNow(el); return; }
+    const obs = new MutationObserver(() => {
+        el = getPanel();
+        if (el) { hideNow(el); obs.disconnect(); }
+    });
+    obs.observe(document.documentElement || document.body, { childList: true, subtree: true });
 }
 
-/**
- * Alterna visibilidad del panel.
- * @returns {boolean} visible - estado final (true si visible)
- */
-export function togglePanel(id = 'panel') {
-    const el = getPanel(id);
-    if (!el) {
-        console.warn(`[panel] No se encontró #${id}`);
-        return false;
-    }
-    return setPanelHidden(id, el.classList.contains('is-hidden') ? false : true);
-}
+/* =============== Botón Leaflet “Pjs” (integrado) =============== */
+const PanelToggleControl = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd() {
+        const wrap = L.DomUtil.create('div', 'leaflet-bar panel-toggle-wrap');
+        const btn = L.DomUtil.create('a', 'panel-toggle-btn', wrap);
+        btn.href = '#';
+        btn.title = 'Mostrar/ocultar panel';
+        btn.textContent = 'Pjs';
+        btn.setAttribute('role', 'button');
+        btn.setAttribute('aria-controls', PANEL_ID);
+        btn.setAttribute('aria-expanded', String(!isPanelHidden()));
+        L.DomEvent.disableClickPropagation(wrap);
+        L.DomEvent.disableScrollPropagation(wrap);
+        L.DomEvent.on(btn, 'click', (e) => {
+            e.preventDefault();
+            const opened = togglePanel({ manual: true });
+            btn.setAttribute('aria-expanded', String(opened));
+        });
 
-/* ================================
-   Recalculo robusto del mapa
-   (layout → invalidateSize)
-================================ */
-let invalidateScheduled = false;
-
-function scheduleLayoutInvalidate(el) {
-    // 1) Intentar tras el fin de transición del panel (si existe)
-    //    Lo hacemos "once" para no acumular listeners.
-    el.addEventListener('transitionend', fireInvalidateOnce, { once: true });
-
-    // 2) Doble rAF asegura que el layout haya aplicado clases y estilos
-    requestAnimationFrame(() => requestAnimationFrame(fireInvalidate));
-
-    // 3) Respaldo por si no hubo transición ni rAF oportuno
-    setTimeout(fireInvalidate, 350);
-}
-
-function fireInvalidateOnce() {
-    fireInvalidate();
-}
-
-function fireInvalidate() {
-    if (invalidateScheduled) return;
-    invalidateScheduled = true;
-
-    // micro-bacheo por si llegan múltiples triggers en cascada
-    setTimeout(() => {
-        try {
-            // Helper directo (si existe)
-            window.__invalidateMap__?.();
-            // Evento desacoplado (tu Map.js lo escucha)
-            document.dispatchEvent(new Event('app:layout-change'));
-        } finally {
-            invalidateScheduled = false;
+        // Si el panel aún no existe, sincronizar cuando aparezca
+        if (!getPanel()) {
+            const obs = new MutationObserver(() => {
+                if (getPanel()) { btn.setAttribute('aria-expanded', String(!isPanelHidden())); obs.disconnect(); }
+            });
+            obs.observe(document.documentElement, { childList: true, subtree: true });
+            setTimeout(() => obs.disconnect(), 10000);
         }
-    }, 0);
+        return wrap;
+    }
+});
+map.addControl(new PanelToggleControl());
+
+/* =============== Integración / cierres automáticos =============== */
+function closeForControlsDelegated() {
+    document.addEventListener('click', (ev) => {
+        const t = ev.target instanceof HTMLElement ? ev.target : null;
+        if (!t) return;
+
+        // Click en otros controles Leaflet (excepto el propio Pjs y zoom)
+        const a = t.closest('.leaflet-top .leaflet-bar a');
+        if (a) {
+            if (a.classList.contains('panel-toggle-btn')) return;
+            if (a.classList.contains('leaflet-control-zoom-in') || a.classList.contains('leaflet-control-zoom-out')) return;
+            hidePanel(); return;
+        }
+
+        // Botones específicos (draw/notas/geocoder/eraser/etc.)
+        const selectors = [
+            '.leaflet-draw-draw-polyline', '.leaflet-draw-draw-polygon',
+            '.leaflet-draw-draw-rectangle', '.leaflet-draw-draw-circle',
+            '.leaflet-draw-draw-marker', '.leaflet-draw-edit-remove',
+            '.leaflet-draw-edit-edit', '#btn-notes', '#btn-notes-list',
+            '#btn-notes-edit', '#btn-eraser', '#btn-geo'
+        ];
+        for (const sel of selectors) {
+            if (t.closest(sel)) { hidePanel(); return; }
+        }
+    }, { capture: true });
+}
+
+function closeOnGeocoderFocus() {
+    document.addEventListener('focusin', (ev) => {
+        const t = ev.target;
+        if (!(t instanceof HTMLElement)) return;
+        if (t.closest('.leaflet-control-geocoder, .geocoder-wrapper, .geocoder-box')) hidePanel();
+    });
+}
+
+function closeOnMapInteraction() {
+    try {
+        const doHide = () => { if (!isPanelHidden()) hidePanel(); };
+        if (map && typeof map.on === 'function') {
+            map.on('mousedown touchstart dragstart zoomstart movestart click', doHide);
+            map.on('wheel', doHide);
+            const mc = map.getContainer?.();
+            mc?.addEventListener('pointerdown', (e) => {
+                const t = e.target;
+                if (!(t instanceof HTMLElement)) return;
+                if (t.closest('#panel, .panel-toggle-btn')) return;
+                doHide();
+            }, { capture: true, passive: true });
+        }
+    } catch { }
+}
+
+/* =============== Hook al posible botón HTML opcional =============== */
+// Si en tu HTML tenés <button id="toggle-panel">, también lo cableamos.
+function bindOptionalHtmlButton() {
+    const bind = () => {
+        const b = document.getElementById('toggle-panel');
+        if (!b || b.dataset._panelBound === '1') return;
+        b.dataset._panelBound = '1';
+        b.addEventListener('click', (e) => { e.preventDefault(); togglePanel({ manual: true }); });
+    };
+    bind();
+    const obs = new MutationObserver(bind);
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+    setTimeout(() => obs.disconnect(), 15000);
+}
+
+/* =============== Init =============== */
+function init() {
+    ensurePanelStartsHidden();
+    closeForControlsDelegated();
+    closeOnGeocoderFocus();
+    closeOnMapInteraction();
+    bindOptionalHtmlButton();
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+    init();
 }

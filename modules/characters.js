@@ -10,6 +10,119 @@ const markers = {};
 const characterEntries = {};
 const markerState = {}; // id -> { name, color }
 
+/* -------- Utils: formato y clipboard ------------------ */
+const fmt = (n, d = 6) => Number(n).toFixed(d);
+
+async function copyToClipboard(text) {
+    if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(text); return true; }
+        catch { /* fallback */ }
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.position = 'absolute'; ta.style.top = '0'; ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+    let ok = false; try { ok = document.execCommand('copy'); } catch { }
+    document.body.removeChild(ta);
+    return ok;
+}
+function flashBtn(btn, ok = true, ms = 1100) {
+    if (!btn) return;
+    const prev = btn.textContent;
+    btn.textContent = ok ? '✔️' : '⚠️';
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, ms);
+}
+
+/* -------- Abrir Street View (app si es posible) ------- */
+function buildMapsUrls(lat, lng) {
+    const latS = fmt(lat), lngS = fmt(lng);
+    return {
+        webStreetView: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${latS},${lngS}`,
+        appStreetView: `comgooglemaps://?api=1&map_action=pano&viewpoint=${latS},${lngS}`
+    };
+}
+function openStreetViewPreferApp(lat, lng) {
+    const { webStreetView, appStreetView } = buildMapsUrls(lat, lng);
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isMobile) {
+        try {
+            const timer = setTimeout(() => {
+                try { window.location.href = webStreetView; } catch { window.open(webStreetView, '_blank', 'noopener'); }
+            }, 900);
+            window.location.href = appStreetView;
+            setTimeout(() => clearTimeout(timer), 2000);
+            return;
+        } catch {
+            window.location.href = webStreetView;
+            return;
+        }
+    }
+
+    try { window.open(webStreetView, '_blank', 'noopener'); } catch { window.location.href = webStreetView; }
+}
+
+/* -------- Follow (seguir pj) -------------------------- */
+let followId = null;
+let lastFollowPan = 0;
+const FOLLOW_THROTTLE_MS = 180;
+
+function isFollowing(id) { return !!id && id === followId; }
+
+function updateFollowButtonsUi() {
+    try {
+        const list = document.getElementById('character-list');
+        if (!list) return;
+        const btns = list.querySelectorAll('button.btn-follow[data-id]');
+        btns.forEach(b => {
+            const id = b.dataset.id;
+            const active = isFollowing(id);
+            b.setAttribute('aria-pressed', String(active));
+            b.classList.toggle('is-active', active);
+            b.title = active ? 'Dejar de seguir' : 'Seguir';
+        });
+    } catch { }
+}
+
+function startFollow(id) {
+    followId = id || null;
+    updateFollowButtonsUi();
+    const m = markers[followId];
+    if (m) { try { map.panTo(m.getLatLng(), { animate: false }); } catch { } }
+}
+
+function stopFollow() {
+    if (!followId) return;
+    followId = null;
+    updateFollowButtonsUi();
+}
+
+function toggleFollow(id) {
+    if (!id) return;
+    if (isFollowing(id)) stopFollow();
+    else startFollow(id);
+}
+
+function maybeFollowPan(id, ll) {
+    if (!isFollowing(id) || !ll) return;
+    if (window.__CHAR_IS_DRAGGING) return;
+    const now = Date.now();
+    if (now - lastFollowPan < FOLLOW_THROTTLE_MS) return;
+    lastFollowPan = now;
+    try { map.panTo(ll, { animate: false }); } catch { }
+}
+
+// Si el usuario mueve/zoomea el mapa, dejamos de seguir
+(function bindStopFollowOnUserPan() {
+    try {
+        const onStart = () => { if (!window.__CHAR_IS_DRAGGING) stopFollow(); };
+        map.on('movestart', onStart);
+        map.on('zoomstart', onStart);
+    } catch { }
+})();
+
 /* -------- GeoPoint compat (v8 global o v9 modular) ---- */
 let GeoPointCtor = null;
 try {
@@ -28,12 +141,23 @@ if (typeof L.Util.clamp !== 'function') {
 }
 
 /* ======================================================
-   Helpers de integración con geocoder
+   Helpers de integración con geocoder (debounce)
 ====================================================== */
+let __geoMoveTimer = null;
+const GEO_MOVE_DEBOUNCE_MS = 280;
+
 function notifyGeocoderMove(id, ll) {
-    if (typeof window.onCharacterMoved === 'function' && ll) {
-        try { window.onCharacterMoved({ id, lat: ll.lat, lng: ll.lng }); } catch { }
+    if (!ll) return;
+    const payload = { id, lat: ll.lat, lng: ll.lng };
+
+    if (window.__CHAR_IS_DRAGGING) {
+        try { window.onCharacterMoved?.(payload); } catch { }
+        return;
     }
+    clearTimeout(__geoMoveTimer);
+    __geoMoveTimer = setTimeout(() => {
+        try { window.onCharacterMoved?.(payload); } catch { }
+    }, GEO_MOVE_DEBOUNCE_MS);
 }
 
 function buildSimpleList() {
@@ -61,9 +185,56 @@ const CLIENT_ID = (() => {
 })();
 
 /* ======================================================
-   Icono (divIcon SVG)
+   Icono (top-down post-apocalíptico)
 ====================================================== */
-function survivorSVG(name = '', shirt = '#1f77ff', size = 28) {
+function survivorApocSVG(name = '', {
+    jacket = '#4b5563',   // color de chaqueta
+    pack = '#1f2937',   // mochila
+    skin = '#d6b58a',
+    band = '#e5e7eb',   // vendaje
+    accent = '#f59e0b',   // bandolera/cinta
+    gore = '#b91c1c',   // rasgón/raspón leve
+    size = 30,
+    flat = true         // sin sombras pesadas
+} = {}) {
+    const uid = 'sv' + Math.random().toString(36).slice(2, 8);
+    const W = size, H = Math.round(size * 1.15);
+    const defs = flat ? '' : `
+  <defs>
+    <filter id="drop_${uid}" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.2"/>
+      <feOffset dy="1"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.45"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>`;
+    const shadow = `<ellipse cx="${W / 2}" cy="${H - 4}" rx="${W * 0.28}" ry="${W * 0.10}" fill="rgba(0,0,0,.35)"/>`;
+    const backpack = `
+  <g ${flat ? '' : `filter="url(#drop_${uid})"`}>
+    <ellipse cx="${W / 2}" cy="${H * 0.62}" rx="${W * 0.34}" ry="${W * 0.20}"
+             fill="${pack}" stroke="#111" stroke-width="1.2"/>
+    <rect x="${W * 0.40}" y="${H * 0.54}" width="${W * 0.06}" height="${W * 0.10}"
+          rx="${W * 0.01}" fill="#111" opacity=".35"/>
+  </g>`;
+    const torso = `
+  <g ${flat ? '' : `filter="url(#drop_${uid})"`}>
+    <ellipse cx="${W / 2}" cy="${H * 0.58}" rx="${W * 0.42}" ry="${W * 0.26}"
+             fill="${jacket}" stroke="#111" stroke-width="1.2"/>
+    <path d="M ${W * 0.28} ${H * 0.48} L ${W * 0.58} ${H * 0.70}" stroke="${accent}"
+          stroke-width="${Math.max(1.2, W * 0.05)}" stroke-linecap="round"/>
+    <path d="M ${W * 0.36} ${H * 0.60} q ${W * 0.06} ${W * 0.04} ${W * 0.12} 0"
+          stroke="${gore}" stroke-width="${Math.max(0.8, W * 0.03)}" />
+    <circle cx="${W * 0.18}" cy="${H * 0.58}" r="${W * 0.10}" fill="${skin}" stroke="#111" stroke-width="0.9"/>
+    <circle cx="${W * 0.82}" cy="${H * 0.58}" r="${W * 0.10}" fill="${skin}" stroke="#111" stroke-width="0.9"/>
+  </g>`;
+    const head = `
+  <g ${flat ? '' : `filter="url(#drop_${uid})"`}>
+    <circle cx="${W / 2}" cy="${H * 0.36}" r="${W * 0.22}" fill="${skin}" stroke="#111" stroke-width="1.1"/>
+    <rect x="${W * 0.32}" y="${H * 0.30}" width="${W * 0.36}" height="${W * 0.06}"
+          rx="${W * 0.01}" fill="${band}" stroke="#0b0b0b" stroke-width="0.8"/>
+    <path d="M ${W * 0.30} ${H * 0.26} q ${W * 0.10} ${-W * 0.06} ${W * 0.20} 0"
+          stroke="#2b2b2b" stroke-width="${Math.max(1, W * 0.04)}" stroke-linecap="round"/>
+  </g>`;
     const label = `
   <div class="survivor-label" style="
     position:absolute; top:-18px; left:50%; transform:translateX(-50%);
@@ -71,30 +242,34 @@ function survivorSVG(name = '', shirt = '#1f77ff', size = 28) {
     background:rgba(255,255,255,.9); border-radius:4px; white-space:nowrap; pointer-events:none;">
     ${escapeHtml(name)}
   </div>`;
-    const svg = `
-  <svg width="${size}" height="${size * 1.4}" viewBox="0 0 64 86" xmlns="http://www.w3.org/2000/svg" aria-label="${escapeAttr(name)}">
-    <ellipse cx="32" cy="78" rx="14" ry="6" fill="rgba(0,0,0,0.25)"/>
-    <circle cx="32" cy="10" r="8" fill="#f2c89b" stroke="#111" stroke-width="1.5"/>
-    <rect x="28" y="17" width="8" height="6" rx="2" fill="#f2c89b" stroke="#111" stroke-width="1"/>
-    <path d="M18 24 L46 24 L54 36 L46 42 L18 42 L10 36 Z" fill="${shirt}" stroke="#111" stroke-width="1.6"/>
-    <rect x="8" y="32" width="10" height="15" rx="4" fill="#f2c89b" stroke="#111" stroke-width="1"/>
-    <rect x="46" y="32" width="10" height="15" rx="4" fill="#f2c89b" stroke="#111" stroke-width="1"/>
-    <path d="M18 42 L46 42 L44 60 L36 60 L34 48 L30 48 L28 60 L20 60 Z" fill="#334155" stroke="#111" stroke-width="1.6"/>
-    <rect x="18" y="60" width="10" height="8" rx="2" fill="#cbd5e1" stroke="#111" stroke-width="1"/>
-    <rect x="36" y="60" width="10" height="8" rx="2" fill="#cbd5e1" stroke="#111" stroke-width="1"/>
-  </svg>`;
-    return `<div class="survivor-icon" style="position:relative; width:${size}px; height:${size * 1.4}px;">${label}${svg}</div>`;
+    return `
+  <div class="survivor-icon" style="position:relative; width:${W}px; height:${H}px;">
+    ${label}
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" aria-label="${escapeAttr(name)}">
+      ${defs}
+      ${shadow}
+      ${backpack}
+      ${torso}
+      ${head}
+    </svg>
+  </div>`;
 }
-function makeSurvivorIcon(name, color) {
-    const html = survivorSVG(name || '', color || '#000000', 28);
+
+// Wrapper compatible con el resto del código
+function makeSurvivorIcon(name, colorOrOpts) {
+    const opts = (typeof colorOrOpts === 'string') ? { jacket: colorOrOpts } : (colorOrOpts || {});
+    const html = survivorApocSVG(name || '', opts);
+    const size = opts.size || 30;
+    const H = Math.round(size * 1.15);
     return L.divIcon({
         html,
         className: 'survivor-divicon',
-        iconSize: [28, 40],
-        iconAnchor: [14, 28],
-        popupAnchor: [0, -30]
+        iconSize: [size, H],
+        iconAnchor: [size / 2, Math.round(H * 0.65)],
+        popupAnchor: [0, -Math.round(H * 0.65)]
     });
 }
+
 function escapeHtml(str) {
     return String(str || '')
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -261,12 +436,13 @@ function maybeAutoPan(ll) {
 }
 
 /* ======================================================
-   Clustering (opcional)
+   Clustering (con corte a zoom de calle)
 ====================================================== */
 let clusterGroup = null;
 (function ensureClusterGroup() {
     if (L.markerClusterGroup) {
         clusterGroup = L.markerClusterGroup({
+            disableClusteringAtZoom: 17, // << a nivel calle no clusterea
             spiderfyOnMaxZoom: true,
             showCoverageOnHover: false,
             zoomToBoundsOnClick: true,
@@ -491,7 +667,6 @@ const renderCharacter = (doc) => {
 
             let { lat, lng } = target.getLatLng();
 
-            // snap final SUAVE solo si SIGUE presionado SHIFT en modo manual
             const shiftPressed = !!(window.event && window.event.shiftKey);
             const route = getActiveRouteLatLngs();
             if (SNAP_MODE === 'manual' && shiftPressed && route && route.length >= 2) {
@@ -525,7 +700,6 @@ const renderCharacter = (doc) => {
                 startLocalFade(id);
             }
 
-            // Señal de fin + borrado diferido
             trailsRef.doc(id).set({
                 clientId: CLIENT_ID,
                 end: true,
@@ -536,13 +710,14 @@ const renderCharacter = (doc) => {
             setTimeout(() => target.closeTooltip(), 300);
             target._lastDragLL = null;
 
-            // desbloqueo
             window.__CHAR_IS_DRAGGING = false;
             window.__CHAR_DRAG_TS__ = 0;
 
             const finalLL = target.getLatLng();
             notifyGeocoderMove(id, finalLL);
             publishToGeocoder();
+
+            maybeFollowPan(id, finalLL);
         });
 
         markers[id] = marker;
@@ -557,29 +732,121 @@ const renderCharacter = (doc) => {
             markers[id].setIcon(makeSurvivorIcon(desiredName, desiredColor));
             markerState[id] = { name: desiredName, color: desiredColor };
         }
+
+        try {
+            const ll = markers[id].getLatLng?.();
+            if (ll) {
+                notifyGeocoderMove(id, ll);
+                maybeFollowPan(id, ll);
+            }
+        } catch { }
+
         publishToGeocoder();
     }
 
-    // entrada de lista
+    // ===== Modal borrar personaje (con pass 456) =====
+    let charDeleteModal = null;
+
+    function openDeleteCharacterModal(id) {
+        closeDeleteCharacterModal();
+
+        const mapEl = map.getContainer();
+        const backdrop = document.createElement('div');
+        backdrop.className = 'notes-modal-backdrop';
+        backdrop.setAttribute('role', 'dialog');
+        backdrop.setAttribute('aria-modal', 'true');
+        backdrop.tabIndex = -1;
+
+        const modal = document.createElement('div');
+        modal.className = 'notes-modal';
+        modal.innerHTML = `
+      <form class="char-delete-form" style="font:13px/1.3 system-ui,sans-serif;">
+        <div style="margin-bottom:8px;">Para borrar el personaje, ingresá la contraseña.</div>
+        <input class="char-pass" type="password" placeholder="Contraseña" autocomplete="off"
+              style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;" />
+        <div class="notes-actions">
+          <button type="button" class="btn btn-cancel">Cancelar</button>
+          <button type="submit" class="btn btn-danger">Borrar</button>
+        </div>
+      </form>`;
+
+        backdrop.appendChild(modal);
+        mapEl.appendChild(backdrop);
+
+        L.DomEvent.disableClickPropagation(modal);
+        L.DomEvent.disableScrollPropagation(modal);
+
+        const form = modal.querySelector('.char-delete-form');
+        const passEl = modal.querySelector('.char-pass');
+        const cancel = modal.querySelector('.btn-cancel');
+
+        setTimeout(() => passEl?.focus(), 0);
+
+        form?.addEventListener('submit', (ev) => {
+            ev.preventDefault(); L.DomEvent.stop(ev);
+            const val = (passEl?.value || '').trim();
+            if (val !== '456') {
+                passEl?.setCustomValidity?.('Contraseña incorrecta');
+                passEl?.reportValidity?.();
+                setTimeout(() => passEl?.setCustomValidity?.(''), 1200);
+                passEl?.select?.();
+                return;
+            }
+            closeDeleteCharacterModal();
+            deleteCharacter(id);
+        });
+
+        const doClose = () => closeDeleteCharacterModal();
+        cancel?.addEventListener('click', (e) => { e.preventDefault(); doClose(); });
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) doClose(); });
+        backdrop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); doClose(); } });
+
+        charDeleteModal = backdrop;
+    }
+
+    function closeDeleteCharacterModal() {
+        try { charDeleteModal?.remove(); } catch { }
+        charDeleteModal = null;
+    }
+
+    // entrada en la lista
     if (!characterEntries[id]) {
         const entry = document.createElement('div');
         entry.className = 'character-entry';
         entry.id = `entry-${id}`;
         entry.innerHTML = `
       <span>${escapeHtml(desiredName)}</span>
-      <button data-action="locate" data-id="${id}">📍</button>
-      <button data-action="delete" data-id="${id}">❌</button>
+      <button data-action="locate" data-id="${id}" title="Centrar">📍</button>
+      <button data-action="follow" data-id="${id}" class="btn-follow" title="Seguir" aria-pressed="false">👁️</button>
+      <button data-action="copy"   data-id="${id}" class="btn-copy"   title="Copiar coordenadas y abrir Street View">📋</button>
+      <button data-action="delete" data-id="${id}" title="Borrar">❌</button>
     `;
         document.getElementById('character-list')?.appendChild(entry);
         characterEntries[id] = entry;
-        entry.addEventListener('click', (e) => {
+
+        entry.addEventListener('click', async (e) => {
             const btn = e.target.closest('button'); if (!btn) return;
             const action = btn.dataset.action; const targetId = btn.dataset.id;
+
             if (action === 'locate') locateCharacter(targetId);
-            if (action === 'delete') deleteCharacter(targetId);
+            if (action === 'follow') toggleFollow(targetId);
+            if (action === 'delete') openDeleteCharacterModal(targetId);
+
+            if (action === 'copy') {
+                const m = markers[targetId];
+                if (!m) return;
+                const ll = m.getLatLng();
+                const text = `${fmt(ll.lat)}, ${fmt(ll.lng)}`;
+                const ok = await copyToClipboard(text);
+                flashBtn(btn, ok);
+                openStreetViewPreferApp(ll.lat, ll.lng);
+            }
         });
+
+        updateFollowButtonsUi();
     } else {
         characterEntries[id].querySelector('span').textContent = desiredName;
+        updateFollowButtonsUi();
     }
 };
 
@@ -597,6 +864,8 @@ function deleteCharacter(id) {
     delete remoteTrails[id];
 
     if (markers[id]) { removeMarkerFromMapOrCluster(markers[id]); delete markers[id]; }
+
+    if (isFollowing(id)) stopFollow();
 
     trailsRef.doc(id).delete().catch(() => { });
     charactersRef.doc(id).delete();
@@ -629,6 +898,7 @@ charactersRef.onSnapshot((snap) => {
             if (characterEntries[id]) { characterEntries[id].remove(); delete characterEntries[id]; }
             trailsRef.doc(id).delete().catch(() => { });
             delete markerState[id];
+            if (isFollowing(id)) stopFollow();
             publishToGeocoder();
         }
     });
@@ -697,6 +967,12 @@ trailsRef.onSnapshot((snap) => {
     .mc-small{ width:32px; height:32px; }
     .mc-med{ width:40px; height:40px; }
     .mc-large{ width:48px; height:48px; }
+
+    /* Botón seguir activo */
+    .character-entry .btn-follow.is-active,
+    .character-entry .btn-follow[aria-pressed="true"]{
+      background:#2563eb; color:#fff; border-color:#2563eb;
+    }
   `;
     document.head.appendChild(style);
 })();
@@ -713,12 +989,14 @@ trailsRef.onSnapshot((snap) => {
                 const ids = Object.keys(markers);
                 for (const id of ids) {
                     const ll = markers[id]?.getLatLng?.();
-                    if (ll) notifyGeocoderMove(id, ll);
+                    if (ll) {
+                        notifyGeocoderMove(id, ll);
+                        maybeFollowPan(id, ll);
+                    }
                 }
             } catch { }
         }
     }
-    // Watchdog: si pasan >2000 ms sin pulso, desbloquear
     setInterval(() => {
         const ts = window.__CHAR_DRAG_TS__ || 0;
         if (window.__CHAR_IS_DRAGGING && ts && (Date.now() - ts > 2000)) hardUnlock();

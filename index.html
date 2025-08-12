@@ -3,260 +3,272 @@
       class="no-js">
 
 <head>
-        <meta charset="UTF-8" />
-        <title>Mapa Apocalipsis en Tiempo Real</title>
+      <meta charset="UTF-8" />
+      <title>Mapa Apocalipsis en Tiempo Real</title>
+      <meta name="viewport"
+            content="width=device-width, initial-scale=1" />
 
-        <meta name="viewport"
-              content="width=device-width, initial-scale=1" />
 
+      <!-- PWA / manifest -->
+      <link rel="manifest"
+            href="/manifest.webmanifest">
+      <link rel="apple-touch-icon"
+            href="/apple-touch-icon.png">
 
-        <!-- PWA / manifest (no rompe si el archivo no existe aún) -->
-        <link rel="manifest"
-              href="/manifest.webmanifest">
-        <link rel="apple-touch-icon"
-              href="/apple-touch-icon.png">
+      <!-- CSP (habilita Nominatim + OSRM + Firestore) -->
+      <meta http-equiv="Content-Security-Policy"
+            content="default-src 'self';
+          connect-src 'self'
+                       https://*.cartocdn.com
+                       https://www.gstatic.com
+                       https://*.googleapis.com
+                       https://firestore.googleapis.com
+                       https://nominatim.openstreetmap.org
+                       https://router.project-osrm.org
+                       https://*.openstreetmap.org
+                       wss://*.googleapis.com;
+          img-src 'self' data: blob: https://*.cartocdn.com;
+          style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com;
+          script-src 'self' https://unpkg.com https://cdnjs.cloudflare.com https://www.gstatic.com 'unsafe-inline';
+          font-src 'self' data:;
+          worker-src 'self' blob:;
+          object-src 'none';
+          base-uri 'self';
+          frame-ancestors 'self';">
 
-        <!-- CSP básica (ideal mover a headers del server en prod) -->
-        <meta http-equiv="Content-Security-Policy"
-              content="default-src 'self';
-                 connect-src 'self' https://*.cartocdn.com https://www.gstatic.com https://*.googleapis.com https://firestore.googleapis.com;
-                 img-src 'self' data: blob: https://*.cartocdn.com;
-                 style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com;
-                 script-src 'self' https://unpkg.com https://cdnjs.cloudflare.com https://www.gstatic.com 'unsafe-inline';
-                 font-src 'self' data:;
-                 worker-src 'self' blob:;
-                 object-src 'none';
-                 base-uri 'self';
-                 frame-ancestors 'self';">
+      <!-- Preconnect / DNS-prefetch: tiles + geocoder + ruteo + firebase -->
+      <link rel="preconnect"
+            href="https://a.basemaps.cartocdn.com"
+            crossorigin>
+      <link rel="preconnect"
+            href="https://b.basemaps.cartocdn.com"
+            crossorigin>
+      <link rel="preconnect"
+            href="https://c.basemaps.cartocdn.com"
+            crossorigin>
+      <link rel="preconnect"
+            href="https://d.basemaps.cartocdn.com"
+            crossorigin>
+      <link rel="dns-prefetch"
+            href="//a.basemaps.cartocdn.com">
+      <link rel="dns-prefetch"
+            href="//b.basemaps.cartocdn.com">
+      <link rel="dns-prefetch"
+            href="//c.basemaps.cartocdn.com">
+      <link rel="dns-prefetch"
+            href="//d.basemaps.cartocdn.com">
+      <link rel="preconnect"
+            href="https://nominatim.openstreetmap.org"
+            crossorigin>
+      <link rel="preconnect"
+            href="https://router.project-osrm.org"
+            crossorigin>
+      <link rel="preconnect"
+            href="https://www.gstatic.com"
+            crossorigin>
+      <link rel="preconnect"
+            href="https://firestore.googleapis.com"
+            crossorigin>
 
-        <!-- Preconnect / DNS-prefetch a tiles -->
-        <link rel="preconnect"
-              href="https://a.basemaps.cartocdn.com"
-              crossorigin>
-        <link rel="preconnect"
-              href="https://b.basemaps.cartocdn.com"
-              crossorigin>
-        <link rel="preconnect"
-              href="https://c.basemaps.cartocdn.com"
-              crossorigin>
-        <link rel="preconnect"
-              href="https://d.basemaps.cartocdn.com"
-              crossorigin>
-        <link rel="dns-prefetch"
-              href="//a.basemaps.cartocdn.com">
-        <link rel="dns-prefetch"
-              href="//b.basemaps.cartocdn.com">
-        <link rel="dns-prefetch"
-              href="//c.basemaps.cartocdn.com">
-        <link rel="dns-prefetch"
-              href="//d.basemaps.cartocdn.com">
-
-        <!-- Preconnect Firebase -->
-        <link rel="preconnect"
-              href="https://www.gstatic.com"
-              crossorigin>
-        <link rel="preconnect"
-              href="https://firestore.googleapis.com"
-              crossorigin>
-
-        <!-- Leaflet (unpkg + SRI oficial) -->
-        <link rel="stylesheet"
-              href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-              integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      <!-- Leaflet -->
+      <link rel="stylesheet"
+            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+            integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+            crossorigin="anonymous"
+            fetchpriority="high" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+              integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
               crossorigin="anonymous"
-              fetchpriority="high" />
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-                integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-                crossorigin="anonymous"
-                defer></script>
+              defer></script>
 
-        <!-- Plugins en cdnjs (pegá el SRI de cdnjs en cada uno) -->
-        <!-- Leaflet.draw 1.0.4 -->
-        <link rel="stylesheet"
-              href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
-              integrity=""
-              crossorigin="anonymous" />
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"
-                integrity=""
-                crossorigin="anonymous"
-                defer></script>
+      <!-- Plugins (sin SRI porque cdnjs no lo pusiste; mejor no dejarlo vacío) -->
+      <link rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
+            crossorigin="anonymous" />
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"
+              crossorigin="anonymous"
+              defer></script>
 
-        <!-- Leaflet Control Geocoder 2.4.0 -->
-        <link rel="stylesheet"
-              href="https://cdnjs.cloudflare.com/ajax/libs/perliedman-leaflet-control-geocoder/2.4.0/Control.Geocoder.min.css"
-              integrity=""
-              crossorigin="anonymous" />
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/perliedman-leaflet-control-geocoder/2.4.0/Control.Geocoder.min.js"
-                integrity=""
-                crossorigin="anonymous"
-                defer></script>
+      <link rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/perliedman-leaflet-control-geocoder/2.4.0/Control.Geocoder.min.css"
+            crossorigin="anonymous" />
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/perliedman-leaflet-control-geocoder/2.4.0/Control.Geocoder.min.js"
+              crossorigin="anonymous"
+              defer></script>
 
-        <!-- MarkerCluster 1.5.3 -->
-        <link rel="stylesheet"
-              href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"
-              integrity=""
-              crossorigin="anonymous" />
-        <link rel="stylesheet"
-              href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"
-              integrity=""
-              crossorigin="anonymous" />
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"
-                integrity=""
-                crossorigin="anonymous"
-                defer></script>
+      <link rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"
+            crossorigin="anonymous" />
+      <link rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"
+            crossorigin="anonymous" />
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"
+              crossorigin="anonymous"
+              defer></script>
 
-        <!-- OpenMapTiles Language (sin SRI oficial publicado) -->
-        <script src="https://unpkg.com/openmaptiles-language@1.1.0/dist/openmaptiles-language.js"
-                defer></script>
+      <!-- OpenMapTiles Language -->
+      <script src="https://unpkg.com/openmaptiles-language@1.1.0/dist/openmaptiles-language.js"
+              defer></script>
 
-        <!-- Firebase compat -->
-        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"
-                defer></script>
-        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"
-                defer></script>
+      <!-- Firebase compat -->
+      <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"
+              defer></script>
+      <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"
+              defer></script>
 
-        <!-- Tus estilos -->
-        <link rel="stylesheet"
-              href="styles.css" />
+      <!-- Tus estilos -->
+      <link rel="stylesheet"
+            href="styles.css" />
 
-        <style>
-                html,
-                body {
-                        height: 100%;
-                        margin: 0;
-                }
+      <!-- Ajustes mínimos in-page -->
+      <style>
+            html,
+            body {
+                  height: 100%;
+                  margin: 0;
+            }
 
-                #map {
-                        width: 100%;
-                        height: 100vh;
-                }
+            #map {
+                  width: 100%;
+                  height: 100vh;
+            }
 
-                .panel {
-                        position: fixed;
-                        left: 0;
-                        right: 0;
-                        bottom: 0;
-                }
+            .panel {
+                  position: fixed;
+                  left: 0;
+                  right: 0;
+                  bottom: 0;
+            }
 
-                .sr-only {
-                        position: absolute;
-                        width: 1px;
-                        height: 1px;
-                        padding: 0;
-                        margin: -1px;
-                        overflow: hidden;
-                        clip: rect(0, 0, 0, 0);
-                        white-space: nowrap;
-                        border: 0;
-                }
+            .sr-only {
+                  position: absolute;
+                  width: 1px;
+                  height: 1px;
+                  padding: 0;
+                  margin: -1px;
+                  overflow: hidden;
+                  clip: rect(0, 0, 0, 0);
+                  white-space: nowrap;
+                  border: 0;
+            }
 
-                .no-js #panel {
-                        display: none;
-                }
-        </style>
+            .no-js #panel {
+                  display: none;
+            }
+      </style>
 
-        <!-- modulepreload: ES modules -->
-        <link rel="modulepreload"
-              href="./config/firebase.js" />
-        <link rel="modulepreload"
-              href="./modules/Map.js" />
-        <link rel="modulepreload"
-              href="./modules/panel.js" />
-        <link rel="modulepreload"
-              href="./modules/panelToggle.js" />
-        <link rel="modulepreload"
-              href="./modules/geocoder.js" />
-        <link rel="modulepreload"
-              href="./modules/Draw.js" />
-        <link rel="modulepreload"
-              href="./modules/pencil.js" />
-        <link rel="modulepreload"
-              href="./modules/characters.js" />
-        <link rel="modulepreload"
-              href="./modules/coords.js" />
-        <link rel="modulepreload"
-              href="./modules/notes.js" />
-        <link rel="modulepreload"
-              href="./modules/sw.js" />
+      <!-- modulepreload (perf) -->
+      <link rel="modulepreload"
+            href="./config/firebase.js" />
+      <link rel="modulepreload"
+            href="./modules/Map.js" />
+      <link rel="modulepreload"
+            href="./modules/panel.js" />
+      <!-- <link rel="modulepreload"
+            href="./modules/panelToggle.js" /> -->
+      <link rel="modulepreload"
+            href="./modules/toolsBus.js" />
+      <link rel="modulepreload"
+            href="./modules/geocoder.js" />
+      <link rel="modulepreload"
+            href="./modules/Draw.js" />
+      <link rel="modulepreload"
+            href="./modules/pencil.js" />
+      <link rel="modulepreload"
+            href="./modules/characters.js" />
+      <link rel="modulepreload"
+            href="./modules/coords.js" />
+      <link rel="modulepreload"
+            href="./modules/notes.js" />
+      <link rel="modulepreload"
+            href="./modules/sw.js" />
+      <link rel="modulepreload"
+            href="./modules/leftControlsToggle.js" />
 
-        <script>document.documentElement.classList.replace('no-js', 'js');</script>
+
+      <script>document.documentElement.classList.replace('no-js', 'js');</script>
 </head>
 
 <body>
-        <noscript>Necesitás habilitar JavaScript para ver el mapa.</noscript>
+      <noscript>Necesitás habilitar JavaScript para ver el mapa.</noscript>
 
-        <div id="map"
-             role="application"
-             aria-label="Mapa principal"
-             tabindex="0"></div>
+      <div id="map"
+           role="application"
+           aria-label="Mapa principal"
+           tabindex="0"></div>
 
-        <div id="panel"
-             class="panel"
-             role="region"
-             aria-label="Panel de controles">
-                <div class="panel-body"
-                     id="add-controls">
-                        <label for="name"
-                               class="sr-only">Nombre del personaje</label>
-                        <input type="text"
-                               id="name"
-                               placeholder="Nombre del personaje"
-                               autocomplete="off"
-                               inputmode="text"
-                               enterkeyhint="done" />
-                        <label for="color"
-                               class="sr-only">Color</label>
-                        <input type="color"
-                               id="color"
-                               value="#ff0000" />
-                        <button id="add-button"
-                                type="button"
-                                aria-controls="character-list"
-                                aria-label="Agregar personaje al mapa">Agregar pj</button>
-                </div>
-                <div class="panel-body"
-                     id="character-list"
-                     aria-live="polite"
-                     aria-busy="false"></div>
-        </div>
+      <!-- Panel inferior (arranca oculto por panel.js) -->
+      <div id="panel"
+           class="panel"
+           role="region"
+           aria-label="Panel de controles">
+            <div class="panel-body"
+                 id="add-controls">
+                  <label for="name"
+                         class="sr-only">Nombre del personaje</label>
+                  <input type="text"
+                         id="name"
+                         placeholder="Nombre del personaje"
+                         autocomplete="off"
+                         inputmode="text"
+                         enterkeyhint="done" />
+                  <label for="color"
+                         class="sr-only">Color</label>
+                  <input type="color"
+                         id="color"
+                         value="#ff0000" />
+                  <button id="add-button"
+                          type="button"
+                          aria-controls="character-list"
+                          aria-label="Agregar personaje al mapa">Agregar pj</button>
+            </div>
+            <div class="panel-body"
+                 id="character-list"
+                 aria-live="polite"
+                 aria-busy="false"></div>
+      </div>
 
-        <!-- Config Firebase -->
-        <script type="module"
-                src="./config/firebase.js"></script>
+      <!-- Config Firebase -->
+      <script type="module"
+              src="./config/firebase.js"></script>
 
-        <!-- Módulos (type=module ya es defer) -->
-        <script type="module"
-                src="./modules/Map.js"></script>
-        <script type="module"
-                src="./modules/panel.js"></script>
-        <script type="module"
-                src="./modules/panelToggle.js"></script>
-        <script type="module"
-                src="./modules/geocoder.js"></script>
-        <script type="module"
-                src="./modules/Draw.js"></script>
-        <script type="module"
-                src="./modules/pencil.js"></script>
-        <script type="module"
-                src="./modules/characters.js"></script>
-        <script type="module"
-                src="./modules/coords.js"></script>
-        <script type="module"
-                src="./modules/notes.js"></script>
-        <script type="module"
-                src="./modules/sw.js"></script>
+      <!-- Módulos (type=module ya es defer) -->
+      <script type="module"
+              src="./modules/Map.js"></script>
+      <script type="module"
+              src="./modules/panel.js"></script>
+      <!-- <script type="module"
+              src="./modules/panelToggle.js"></script> -->
+      <script type="module"
+              src="./modules/toolsBus.js"></script>
+      <script type="module"
+              src="./modules/geocoder.js"></script>
+      <script type="module"
+              src="./modules/Draw.js"></script>
+      <script type="module"
+              src="./modules/pencil.js"></script>
+      <script type="module"
+              src="./modules/characters.js"></script>
+      <script type="module"
+              src="./modules/coords.js"></script>
+      <script type="module"
+              src="./modules/notes.js"></script>
+      <script type="module"
+              src="./modules/sw.js"></script>
+      <script type="module"
+              src="./modules/leftControlsToggle.js"></script>
 
-        <!-- Logger genérico de errores de carga de módulos (no cambia tu flujo) -->
-        <script type="module">
-                const mods = [
-                        "./modules/Map.js", "./modules/panel.js", "./modules/panelToggle.js",
-                        "./modules/geocoder.js", "./modules/Draw.js", "./modules/pencil.js",
-                        "./modules/characters.js", "./modules/coords.js", "./modules/notes.js", "./modules/sw.js"
-                ];
-                for (const m of mods) {
-                        import(m).catch(err => console.error("[Module load error]", m, err));
-                }
-        </script>
+
+      <!-- Logger de carga de módulos -->
+      <script type="module">
+            const mods = [
+                  "./modules/Map.js", "./modules/panel.js",
+                  "./modules/toolsBus.js", "./modules/geocoder.js", "./modules/Draw.js",
+                  "./modules/pencil.js", "./modules/characters.js", "./modules/coords.js",
+                  "./modules/notes.js", "./modules/sw.js", "./modules/leftControlsToggle.js"
+            ];
+            for (const m of mods) import(m).catch(err => console.error("[Module load error]", m, err));
+      </script>
 </body>
 
 </html>

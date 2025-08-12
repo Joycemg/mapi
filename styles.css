@@ -151,6 +151,7 @@ button,
   padding: 2px 3px; font-size: 8px; border-radius: 2px;
 }
 
+/* ------- Lápiz / Goma UI ------- */
 .leaflet-bar .pencil-tools .pencil-color {
   display: flex; align-items: center; gap: 4px; padding: 4px; background: #fff;
 }
@@ -167,10 +168,28 @@ button,
 .leaflet-bar a.custom-pencil.active { background-color: #ddd; }
 .pencil-color.selected { outline: 2px solid #2e7dff; }
 
+/* Igualar lápiz/goma al tamaño de los botones Leaflet */
+.leaflet-bar .pencil-wrapper a {
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+  padding: 0;
+}
+
 /* Estados */
 @media (pointer: coarse) {
-  button, [role="button"], .panel-toggle-btn {
+  /* En móvil: NO agrandar por rol (evita inflar <a role="button">) */
+  button, .panel-toggle-btn {
     min-width: var(--tap); min-height: var(--tap);
+  }
+
+  /* Lápiz/Goma: tamaño fijo como el resto y sin preview debajo */
+  .leaflet-bar .pencil-wrapper a {
+    min-width: 28px;
+    min-height: 28px;
+  }
+  .pencil-wrapper .stroke-preview {
+    display: none !important;
   }
 }
 :where(button, [role="button"], .panel-toggle-btn):focus-visible {
@@ -220,3 +239,26 @@ html, body { overflow-x: hidden; }
 
 /* Por las dudas, controles de Leaflet no rompen layout */
 .leaflet-control { max-width: 100vw; }
+
+/* Ocultar/mostrar controles del lateral izquierdo con animación */
+.leaflet-top.leaflet-left,
+.leaflet-bottom.leaflet-left {
+  transition: transform .18s ease, opacity .18s ease;
+}
+
+.map-tools-collapsed-left .leaflet-top.leaflet-left,
+.map-tools-collapsed-left .leaflet-bottom.leaflet-left {
+  transform: translateX(-120%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Botón del toggle (tamaño consistente con Leaflet) */
+.tools-collapse-wrap .tools-collapse-btn {
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+  display: inline-block;
+  text-decoration: none;
+  user-select: none;
+}

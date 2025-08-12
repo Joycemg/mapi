@@ -3,6 +3,7 @@ import { map } from './Map.js';
 
 const fmt = (n, d = 6) => Number(n).toFixed(d);
 
+/* ===== Clipboard ===== */
 async function copyToClipboard(text) {
   if (navigator.clipboard?.writeText) {
     try { await navigator.clipboard.writeText(text); return true; }
@@ -18,41 +19,95 @@ async function copyToClipboard(text) {
   return ok;
 }
 
+/* ===== Abrir Street View (app si es posible) ===== */
+function buildMapsUrls(lat, lng) {
+  const latS = fmt(lat), lngS = fmt(lng);
+  return {
+    webStreetView: `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${latS},${lngS}`,
+    appStreetView: `comgooglemaps://?api=1&map_action=pano&viewpoint=${latS},${lngS}`
+  };
+}
+function openStreetViewPreferApp(lat, lng) {
+  const { webStreetView, appStreetView } = buildMapsUrls(lat, lng);
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  if (isMobile) {
+    try {
+      const timer = setTimeout(() => {
+        try { window.location.href = webStreetView; } catch { window.open(webStreetView, '_blank', 'noopener'); }
+      }, 900);
+      window.location.href = appStreetView; // intenta app
+      setTimeout(() => clearTimeout(timer), 2000);
+      return;
+    } catch {
+      window.location.href = webStreetView;
+      return;
+    }
+  }
+  try { window.open(webStreetView, '_blank', 'noopener'); } catch { window.location.href = webStreetView; }
+}
+
 /* ========== Popup reutilizable ========== */
 const IS_TOUCH = 'ontouchstart' in window;
-const POPUP_OFFSET_Y = IS_TOUCH ? -28 : -16; // anclar un poco arriba (más en móvil)
+const POPUP_OFFSET_Y = IS_TOUCH ? -28 : -16;
 
 let coordsPopup = L.popup({
   autoClose: true,
   closeOnClick: true,
   keepInView: true,
-  offset: [0, POPUP_OFFSET_Y],  // << anclado hacia arriba
-  maxWidth: 260
+  offset: [0, POPUP_OFFSET_Y],
+  maxWidth: 320
 });
 
-function buildPopupHtml(text, copiedNow = false) {
+function buttonCompactHtml(id, icon, label) {
   return `
-    <div style="font:12px/1.35 sans-serif; min-width:180px">
+    <button id="${id}" class="btn-compact" style="
+      flex:1 1 0;
+      min-width:44px;
+      height:44px;
+      display:grid;
+      place-items:center;
+      border:1px solid #d1d5db;
+      border-radius:8px;
+      background:#fff;
+      cursor:pointer;
+      user-select:none;
+      padding:0 8px;
+    " title="${label}" aria-label="${label}">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+        <span style="font-size:15px;line-height:1">${icon}</span>
+        <small style="font:600 10px/1.1 system-ui,sans-serif;color:#111">${label}</small>
+      </div>
+    </button>
+  `;
+}
+
+function buildPopupHtml(lat, lng, copiedNow = false) {
+  const text = `${fmt(lat)}, ${fmt(lng)}`;
+  return `
+    <div class="coords-popup" data-lat="${lat}" data-lng="${lng}"
+         style="font:12px/1.35 system-ui,sans-serif; min-width:220px; max-width:280px;">
       <input id="coords-input" value="${text}" readonly
-        style="width:100%;box-sizing:border-box;padding:6px 8px;font:inherit;">
-      <div style="display:flex;gap:6px;margin-top:6px;">
-        <button id="copy-coords" style="flex:1;padding:6px 10px;cursor:pointer;">
-          ${copiedNow ? '¡Copiado!' : 'Copiar'}
-        </button>
-        <button id="select-coords" style="padding:6px 10px;cursor:pointer;">
-          Seleccionar
-        </button>
+        style="width:100%;box-sizing:border-box;padding:6px 8px;font:inherit;border:1px solid #d1d5db;border-radius:6px;">
+      <div class="btn-row" style="
+        display:flex;
+        gap:6px;
+        margin-top:8px;
+        align-items:stretch;
+        justify-content:space-between;
+      ">
+        ${buttonCompactHtml('copy-coords', '📋', copiedNow ? '¡Copiado!' : 'Copiar')}
+        ${buttonCompactHtml('select-coords', '🔎', 'Seleccionar')}
+        ${buttonCompactHtml('open-street', '🧭', 'Street View')}
       </div>
     </div>
   `;
 }
 
 function showCoordsPopup(latlng, copiedNow = false) {
-  const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
-
   coordsPopup
     .setLatLng(latlng)
-    .setContent(buildPopupHtml(text, copiedNow))
+    .setContent(buildPopupHtml(latlng.lat, latlng.lng, copiedNow))
     .openOn(map);
 
   map.once('popupopen', (e) => {
@@ -66,25 +121,38 @@ function showCoordsPopup(latlng, copiedNow = false) {
 /* ========== Eventos del popup (delegados) ========== */
 document.addEventListener('click', async (ev) => {
   const t = ev.target; if (!(t instanceof HTMLElement)) return;
-
-  // Solo si el click vino desde un popup Leaflet
   if (!t.closest('.leaflet-popup')) return;
 
-  if (t.id === 'copy-coords') {
+  const root = t.closest('.leaflet-popup-content') || document;
+  const wrap = root.querySelector('.coords-popup');
+
+  // Resolver el botón aunque hagan click en elementos internos
+  const btn = t.closest('button[id]');
+  if (!btn) return;
+
+  if (btn.id === 'copy-coords') {
     ev.preventDefault(); ev.stopPropagation();
-    const root = t.closest('.leaflet-popup-content') || document;
     const inp = root.querySelector('#coords-input');
     const text = inp?.value || '';
     const ok = await copyToClipboard(text);
-    t.textContent = ok ? '¡Copiado!' : 'No se pudo copiar';
-    setTimeout(() => (t.textContent = 'Copiar'), 1100);
+    const label = btn.querySelector('small');
+    if (label) {
+      label.textContent = ok ? '¡Copiado!' : 'Error';
+      setTimeout(() => (label.textContent = 'Copiar'), 1100);
+    }
   }
 
-  if (t.id === 'select-coords') {
+  if (btn.id === 'select-coords') {
     ev.preventDefault(); ev.stopPropagation();
-    const root = t.closest('.leaflet-popup-content') || document;
     const inp = root.querySelector('#coords-input');
     inp?.focus(); inp?.select(); inp?.setSelectionRange(0, inp.value.length);
+  }
+
+  if (btn.id === 'open-street') {
+    ev.preventDefault(); ev.stopPropagation();
+    const lat = Number(wrap?.dataset.lat);
+    const lng = Number(wrap?.dataset.lng);
+    if (isFinite(lat) && isFinite(lng)) openStreetViewPreferApp(lat, lng);
   }
 }, { passive: false });
 
@@ -113,8 +181,8 @@ let multiTouch = false;
 let pinching = false;
 
 // Umbrales
-const MAX_DT_MS = 350;       // ventana entre taps
-const MAX_MOVE_PX = 10;      // tolerancia de movimiento
+const MAX_DT_MS = 350;
+const MAX_MOVE_PX = 10;
 
 // Aux: ¿toca sobre UI?
 function isOverUiClientXY(x, y) {
@@ -137,11 +205,11 @@ map.getContainer().addEventListener('touchend', (ev) => {
   }
 }, { passive: true });
 
-// Detección de doble tap limpio
+// Doble tap limpio
 map.getContainer().addEventListener('touchstart', (ev) => {
-  if (ev.touches.length !== 1) return;                // solo 1 dedo
+  if (ev.touches.length !== 1) return;
   const t = ev.touches[0];
-  if (isOverUiClientXY(t.clientX, t.clientY)) return; // no sobre UI
+  if (isOverUiClientXY(t.clientX, t.clientY)) return;
   startedAt = Date.now();
   startPoint = map.mouseEventToContainerPoint(t);
   moved = false;
@@ -174,8 +242,7 @@ map.getContainer().addEventListener('touchend', async (ev) => {
 
   if (isDouble) {
     const latlng = map.containerPointToLatLng(p);
-    const text = `${fmt(latlng.lat)}, ${fmt(latlng.lng)}`;
-    let copied = false; try { copied = await copyToClipboard(text); } catch { }
+    let copied = false; try { copied = await copyToClipboard(`${fmt(latlng.lat)}, ${fmt(latlng.lng)}`); } catch { }
     showCoordsPopup(latlng, copied);
     ev.preventDefault();
     ev.stopPropagation();

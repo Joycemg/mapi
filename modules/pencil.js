@@ -4,6 +4,8 @@ import { drawnItems } from './Draw.js';
 import { db } from '../config/firebase.js';
 import { hidePanel, showPanel } from './panel.js';
 
+
+import { registerTool, toggleTool, activateTool, deactivateTool, isToolActive } from './toolsBus.js';
 /* =========================
    Estado / Config
 ========================= */
@@ -196,6 +198,28 @@ const PencilControl = L.Control.extend({
 });
 
 map.addControl(new PencilControl());
+
+
+// === toolsBus: registro de herramientas (exclusivo) ===
+try {
+    registerTool('pencil', {
+        sticky: true,
+        enable: () => enablePencil(),
+        disable: () => disablePencil(),
+        isActive: () => mode === 'pencil',
+        // Soporta tanto el botón del control Leaflet como un botón opcional en tu HTML
+        buttons: ['#btn-pencil']
+    });
+
+    registerTool('eraser', {
+        sticky: true,
+        enable: () => enableEraser(),
+        disable: () => disableEraser(),
+        isActive: () => mode === 'eraser',
+        buttons: ['#btn-eraser']
+    });
+} catch (e) { console.error('[pencil] toolsBus register error:', e); }
+
 
 function createBtn(icon, cls, title, container, onClick, withPreview = false) {
     const a = L.DomUtil.create('a', cls, container);
@@ -410,19 +434,21 @@ function finishOrCancelStroke() {
 }
 
 function handlePencilClick() {
+    // cancelar/terminar trazo actual para evitar estados colgados
     finishOrCancelStroke();
     swallowNext(260);
-
-    disableEraser();
-    (mode === 'pencil') ? disablePencil() : enablePencil();
+    // Exclusivo via bus: alternar herramienta lápiz
+    if (typeof toggleTool === 'function') toggleTool('pencil', { manual: true });
 }
+
 function handleEraserClick() {
+    // cancelar/terminar trazo actual para evitar estados colgados
     finishOrCancelStroke();
     swallowNext(260);
-
-    disablePencil();
-    (mode === 'eraser') ? disableEraser() : enableEraser();
+    // Exclusivo via bus: alternar herramienta goma
+    if (typeof toggleTool === 'function') toggleTool('eraser', { manual: true });
 }
+
 
 // Export util para apagar cualquier herramienta activa desde otros módulos
 export function deactivateDrawingTools() {

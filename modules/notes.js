@@ -1,10 +1,13 @@
 // modules/notes.js
-// Notas con: crear/editar en modal centrado, borrar con pass "456", lista 📒, colores e íconos (incluye Refugio).
-// Anti-deriva: modal dentro del contenedor del mapa + L.Icon (SVG data URL, anchor fijo).
-// NEW: Pane propio para notas (z-index menor) para no superponer a los iconos de caracteres.
+// Notas con: crear/editar en modal centrado, borrar con pass "456", lista 📒 con búsqueda y salto,
+// íconos (incluye Refugio) y colores (blanco/negro/verde/rojo).
+// Anti-deriva: modal dentro del contenedor del mapa + L.Icon (SVG data URL, anchor fijo). Pane propio.
+// Mejoras: cache de íconos, batch de snapshot con rAF, render condicional, orden por cercanía a la vista.
+// Integración: toolsBus (exclusividad). Tools: "notes" (modo crear), "notes-list" (lista), "notes-edit" (acción momentánea).
 
 import { map } from './Map.js';
 import { db } from '../config/firebase.js';
+import { registerTool, toggleTool, activateTool } from './toolsBus.js';
 
 /* ================= Firestore ================= */
 function getFS() {
@@ -35,8 +38,8 @@ function tsToMs(v) {
 /* ================= Estado ================= */
 let noteMode = false;
 let noteBtn = null;
-const markers = new Map();   // id -> L.marker
-const notesData = new Map();   // id -> data (para lista)
+const markers = new Map();     // id -> L.marker
+const notesData = new Map();   // id -> data
 let unsub = null;
 
 // creación/edición/borrado
@@ -51,14 +54,13 @@ let listPanel = null;
 let listOpen = false;
 let listFilter = '';
 
-/* ===== Config panes (NO superponer a caracteres) ===== */
+/* ===== Pane (NO superponer a otros) ===== */
 const NOTES_PANE = 'notesPane';
-const NOTES_PANE_Z = 580; // < 600 (markerPane). Si tus "caracteres" usan z-index menor, subí este número.
+const NOTES_PANE_Z = 580;
 function ensureNotesPane() {
     if (!map.getPane(NOTES_PANE)) {
         const pane = map.createPane(NOTES_PANE);
         pane.style.zIndex = String(NOTES_PANE_Z);
-        // pane.classList.add('leaflet-zoom-animated'); // default
     }
 }
 
@@ -91,15 +93,16 @@ function ensureCssOnce() {
   .noteslist-title { font-weight:600; color:#111827; }
   .noteslist-sub { font-size:11px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .noteslist-pill { align-self:center; font-size:10px; padding:2px 6px; border-radius:999px; border:1px solid #d1d5db; color:#374151; }
+  .noteslist-foot { padding:8px 10px; font-size:12px; color:#6b7280; border-top:1px solid #f3f4f6; }
 
-  /* Modales (anti-salto): dentro del contenedor del mapa */
+  /* Modales */
   .notes-modal-backdrop{
     position:absolute; inset:0; z-index:2000;
     display:grid; place-items:center;
     background: rgba(0,0,0,.25);
   }
   .notes-modal{
-    width:min(92vw, 380px);
+    width:min(92vw, 420px);
     max-height:80vh; overflow:auto;
     background:#fff; border-radius:10px;
     box-shadow: 0 12px 30px rgba(0,0,0,.25);
@@ -131,10 +134,36 @@ function toast(msg) {
     } catch { }
 }
 
+/* ==== Helpers para coords / clipboard / Street View ==== */
+const fmt = (n, d = 6) => (isFinite(n) ? Number(n).toFixed(d) : '');
+
+async function copyToClipboard(text) {
+    if (!text) return false;
+    if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(text); return true; } catch { }
+    }
+    // fallback
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.position = 'absolute'; ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+    let ok = false; try { ok = document.execCommand('copy'); } catch { }
+    document.body.removeChild(ta);
+    return ok;
+}
+
+function openStreetView(lat, lng) {
+    if (!isFinite(lat) || !isFinite(lng)) { toast('Coordenadas inválidas'); return; }
+    const url = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`;
+    try { window.open(url, '_blank', 'noopener'); }
+    catch { location.href = url; }
+}
+
 /* ================= Iconos ================= */
 const PRESET_ICONS = [
     { value: 'note', label: 'Nota' },
-    { value: 'shelter', label: 'Refugio' },   // NUEVO refuerzo: refugio
+    { value: 'shelter', label: 'Refugio' },
     { value: 'flag', label: 'Bandera' },
     { value: 'danger', label: 'Peligro' },
     { value: 'water', label: 'Agua' },
@@ -149,8 +178,9 @@ const PRESET_COLORS = [
     { hex: '#e11d48', label: 'Rojo' },
 ];
 
-const ICON_SIZE = 28;      // fijo → sin reflows
-const ICON_ANCHOR = [14, 14]; // centro exacto
+const ICON_SIZE = 28;
+const ICON_ANCHOR = [14, 14];
+const iconCache = new Map(); // key: `${type}|${color}` -> L.Icon
 
 function swatchBtn(hex, title, selected = false) {
     return `<button type="button" class="note-color-swatch" data-color="${hex}" title="${title}"
@@ -179,10 +209,13 @@ function svgFor(type, color = '#000000') {
         case 'camp':
             return `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 6c2 2 2 3.5 0 5.5C10 10.5 10 8 12 6z" fill="${MAIN}" stroke="${STROKE}" stroke-width="1.5"/><line x1="7" y1="18" x2="17" y2="14" stroke="${STROKE}" stroke-width="2" stroke-linecap="round"/><line x1="7" y1="14" x2="17" y2="18" stroke="${STROKE}" stroke-width="2" stroke-linecap="round"/></svg>`;
         default:
-            return `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="4" width="14" height="16" rx="2" fill="${FILL}" stroke="${STROKE}" stroke-width="2"/><path d="M15 4v5h5" fill="${MAIN}" stroke="${STROKE}" stroke-width="1.5"/><line x1="7" y1="11" x2="13" y2="11" stroke="${MAIN}" stroke-width="1.8" stroke-linecap="round"/><line x1="7" y1="14" x2="15" y2="14" stroke="${MAIN}" stroke-width="1.8" stroke-linecap="round"/><line x1="7" y1="17" x2="12" y2="17" stroke="${MAIN}" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+            return `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="4" width="14" height="16" rx="2" fill="#fff" stroke="${STROKE}" stroke-width="2"/><path d="M15 4v5h5" fill="${MAIN}" stroke="${STROKE}" stroke-width="1.5"/><line x1="7" y1="11" x2="13" y2="11" stroke="${MAIN}" stroke-width="1.8" stroke-linecap="round"/><line x1="7" y1="14" x2="15" y2="14" stroke="${MAIN}" stroke-width="1.8" stroke-linecap="round"/><line x1="7" y1="17" x2="12" y2="17" stroke="${MAIN}" stroke-width="1.8" stroke-linecap="round"/></svg>`;
     }
 }
-function makeIcon(type = 'note', color = '#000000') {
+function getIcon(type = 'note', color = '#000000') {
+    const key = `${type}|${color}`;
+    if (iconCache.has(key)) return iconCache.get(key);
+
     const inner = svgFor(type, color).replace(/<\?xml.*\?>/g, '').replace('<svg', '<g').replace('</svg>', '</g>');
     const svg = encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" width="${ICON_SIZE}" height="${ICON_SIZE}" viewBox="0 0 28 28">
@@ -191,13 +224,15 @@ function makeIcon(type = 'note', color = '#000000') {
     </svg>
   `.trim());
     const url = `data:image/svg+xml;charset=UTF-8,${svg}`;
-    return L.icon({
+    const icon = L.icon({
         iconUrl: url,
         iconSize: [ICON_SIZE, ICON_SIZE],
-        iconAnchor: [14, 14],
+        iconAnchor: ICON_ANCHOR,
         popupAnchor: [0, -14],
         className: 'note-icon'
     });
+    iconCache.set(key, icon);
+    return icon;
 }
 
 /* ================= Controles ================= */
@@ -210,7 +245,7 @@ const NotesControl = L.Control.extend({
         a.title = 'Agregar nota';
         a.setAttribute('aria-label', 'Agregar nota');
         a.textContent = '📝';
-        a.onclick = (e) => { e.preventDefault(); toggleNoteMode(); };
+        a.onclick = (e) => { e.preventDefault(); toggleTool('notes', { manual: true }); }; // BUS
         L.DomEvent.disableClickPropagation(w);
         L.DomEvent.disableScrollPropagation(w);
         noteBtn = a;
@@ -231,7 +266,7 @@ const NotesListControl = L.Control.extend({
         listBtn.title = 'Notas (lista)';
         listBtn.setAttribute('aria-label', 'Notas (lista)');
         listBtn.textContent = '📒';
-        listBtn.onclick = (e) => { e.preventDefault(); toggleListPanel(); };
+        listBtn.onclick = (e) => { e.preventDefault(); toggleTool('notes-list', { manual: true }); }; // BUS
 
         listPanel = L.DomUtil.create('div', 'noteslist-panel', wrapper);
         listPanel.innerHTML = buildListPanelHtml();
@@ -260,54 +295,85 @@ function bindListPanelEvents() {
     listEl?.addEventListener('click', (ev) => {
         const item = ev.target.closest('.noteslist-item'); if (!item) return;
         const id = item.getAttribute('data-id'); if (!id || !markers.get(id)) return;
-        if (listOpen) toggleListPanel();
+        if (listOpen) closeListPanel();      // cerrar lista al saltar
         openNote(id);
     });
     // cerrar al click afuera
     document.addEventListener('pointerdown', (e) => {
         if (!listOpen || !listPanel) return;
         const inside = listPanel.contains(e.target) || listBtn?.contains(e.target);
-        if (!inside) toggleListPanel();
+        if (!inside) closeListPanel();
     });
+
+    // Reordenar por cercanía cuando cambie la vista
+    map.on('moveend zoomend', () => { if (listOpen) renderListDebounced(); });
 }
-function toggleListPanel() {
-    listOpen = !listOpen;
-    if (!listPanel) return;
-    listPanel.classList.toggle('open', listOpen);
-    listBtn?.classList.toggle('active', listOpen);
-    if (listOpen) {
-        renderList();
-        const input = listPanel.querySelector('.noteslist-filter'); input?.focus();
-    }
+function openListPanel() {
+    if (listOpen || !listPanel) return;
+    listOpen = true;
+    listPanel.classList.add('open');
+    listBtn?.classList.add('active');
+    renderList();
+    const input = listPanel.querySelector('.noteslist-filter'); input?.focus();
+}
+function closeListPanel() {
+    if (!listOpen || !listPanel) return;
+    listOpen = false;
+    listPanel.classList.remove('open');
+    listBtn?.classList.remove('active');
 }
 const renderListDebounced = debounce(renderList, 80);
+
 function renderList() {
     if (!listPanel) return;
     const listEl = listPanel.querySelector('.noteslist-list'); if (!listEl) return;
 
-    const items = Array.from(notesData.entries()).map(([id, d]) => ({
+    const center = map.getCenter();
+    const bounds = map.getBounds();
+
+    // datos base
+    let items = Array.from(notesData.entries()).map(([id, d]) => ({
         id,
         title: d.title || 'Nota',
         body: d.body || '',
         iconType: d.iconType || 'note',
         updated: tsToMs(d.updatedAt) || tsToMs(d.createdAt) || 0,
+        lat: d.lat, lng: d.lng
     }));
 
-    let filtered = items;
+    // filtro por texto
     if (listFilter) {
         const q = listFilter;
-        filtered = items.filter(it =>
-            it.title.toLowerCase().includes(q) || it.body.toLowerCase().includes(q)
+        items = items.filter(it =>
+            (it.title + ' ' + it.body).toLowerCase().includes(q)
         );
     }
-    filtered.sort((a, b) => b.updated - a.updated);
 
-    if (filtered.length === 0) {
+    // orden: en viewport primero, luego por distancia al centro, luego updated desc
+    const centerLL = L.latLng(center.lat, center.lng);
+    items.forEach(it => {
+        const ll = L.latLng(it.lat, it.lng);
+        it.inView = bounds.contains(ll) ? 1 : 0;
+        it.dist = ll.distanceTo(centerLL) || Number.POSITIVE_INFINITY;
+    });
+    items.sort((a, b) => {
+        if (b.inView !== a.inView) return b.inView - a.inView;
+        if (a.dist !== b.dist) return a.dist - b.dist;
+        return b.updated - a.updated;
+    });
+
+    // recorte por rendimiento si la lista es enorme
+    const HARD_LIMIT = 300;
+    const SHOW = items.slice(0, HARD_LIMIT);
+    const hiddenCount = items.length - SHOW.length;
+
+    if (SHOW.length === 0) {
         listEl.innerHTML = `<div class="noteslist-empty" style="padding:10px 12px;color:#6b7280;">No hay notas${listFilter ? ' que coincidan.' : '.'}</div>`;
         return;
     }
 
-    listEl.innerHTML = filtered.map(it => {
+    // render
+    listEl.innerHTML = SHOW.map(it => {
         const label = PRESET_ICONS.find(p => p.value === it.iconType)?.label || 'Nota';
         const sub = it.body ? it.body.replace(/\s+/g, ' ').slice(0, 80) : '';
         return `
@@ -318,7 +384,7 @@ function renderList() {
         </div>
         <div class="noteslist-pill">${escapeHtml(label)}</div>
       </div>`;
-    }).join('');
+    }).join('') + (hiddenCount > 0 ? `<div class="noteslist-foot">+${hiddenCount} más (acotado por rendimiento)</div>` : '');
 }
 
 /* ================= Modales ================= */
@@ -368,7 +434,7 @@ function modalEditHtml(d) {
     </div>
     <textarea class="note-body" rows="3" maxlength="1000"
       style="width:100%;height:120px;max-height:120px;overflow:auto;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;resize:vertical;">${escapeHtml(d.body || '')}</textarea>
-    <div class="notes-actions">
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
       <button type="button" class="btn btn-cancel">Cancelar</button>
       <button type="submit" class="btn btn-primary">Guardar</button>
     </div>
@@ -461,13 +527,11 @@ function openCreationModal(latlng) {
 
     creationModal = backdrop;
 }
-function closeCreationModal() {
-    try { creationModal?.remove(); } catch { }
-    creationModal = null;
-    creationLatLng = null;
-}
+function closeCreationModal() { try { creationModal?.remove(); } catch { } creationModal = null; creationLatLng = null; }
 
 function openEditModal(id, data) {
+    // Acción momentánea: apaga otras tools pero no queda "activa"
+    activateTool('notes-edit');
     closeEditModal();
     try { markers.get(id)?.closePopup(); } catch { }
 
@@ -519,7 +583,7 @@ function openEditModal(id, data) {
             notesData.set(id, updated);
             const m = markers.get(id);
             if (m) {
-                m.setIcon(makeIcon(iconType, color));
+                m.setIcon(getIcon(iconType, color));
                 bindPopup(m, id, updated);
             }
             toast('Nota actualizada');
@@ -539,12 +603,11 @@ function openEditModal(id, data) {
 
     editModal = backdrop;
 }
-function closeEditModal() {
-    try { editModal?.remove(); } catch { }
-    editModal = null;
-}
+function closeEditModal() { try { editModal?.remove(); } catch { } editModal = null; }
 
 function openDeleteModal(id) {
+    // Acción momentánea para forzar exclusividad
+    activateTool('notes-edit');
     closeDeleteModal();
     const mapEl = map.getContainer();
     const backdrop = document.createElement('div');
@@ -571,11 +634,7 @@ function openDeleteModal(id) {
     form?.addEventListener('submit', async (ev) => {
         ev.preventDefault(); L.DomEvent.stop(ev);
         const val = (passEl?.value || '').trim();
-        if (val !== '456') {
-            toast('Contraseña incorrecta');
-            passEl?.select?.();
-            return;
-        }
+        if (val !== '456') { toast('Contraseña incorrecta'); passEl?.select?.(); return; }
         closeDeleteModal();
         await safeDeleteNote(id);
     });
@@ -587,10 +646,7 @@ function openDeleteModal(id) {
 
     deleteModal = backdrop;
 }
-function closeDeleteModal() {
-    try { deleteModal?.remove(); } catch { }
-    deleteModal = null;
-}
+function closeDeleteModal() { try { deleteModal?.remove(); } catch { } deleteModal = null; }
 
 /* ================= Interacción de creación ================= */
 function enableNoteMode() {
@@ -637,12 +693,22 @@ function viewHtml(d) {
       <strong class="note-title-view" title="Doble clic para renombrar">${escapeHtml(title)}</strong>
     </div>
     ${body ? `<div class="note-scroll" style="max-height:180px; overflow:auto; scrollbar-gutter:stable;"><div style="white-space:pre-wrap;">${escapeHtml(body)}</div></div>` : ''}
-    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:8px;">
-      <button type="button" class="note-edit"   style="border:1px solid #d1d5db;border-radius:6px;padding:4px 8px;background:#fff;cursor:pointer;">Editar</button>
-      <button type="button" class="note-delete" style="border:1px solid #ef4444;border-radius:6px;padding:4px 8px;background:#ef4444;color:#fff;cursor:pointer;">Borrar</button>
+
+    <!-- botones en UNA SOLA FILA -->
+    <div class="note-actions"
+         style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; margin-top:8px;">
+      <button type="button" class="note-copycoords"
+        style="width:100%; border:1px solid #d1d5db; border-radius:6px; padding:6px 4px; background:#fff; cursor:pointer; font-size:12px;">Copiar coords</button>
+      <button type="button" class="note-streetview"
+        style="width:100%; border:1px solid #0ea5e9; border-radius:6px; padding:6px 4px; background:#e0f2fe; color:#0c4a6e; cursor:pointer; font-size:12px;">Street View</button>
+      <button type="button" class="note-edit"
+        style="width:100%; border:1px solid #d1d5db; border-radius:6px; padding:6px 4px; background:#fff; cursor:pointer; font-size:12px;">Editar</button>
+      <button type="button" class="note-delete"
+        style="width:100%; border:1px solid #ef4444; border-radius:6px; padding:6px 4px; background:#ef4444; color:#fff; cursor:pointer; font-size:12px;">Borrar</button>
     </div>
   </div>`;
 }
+
 
 function attachDelegatedHandlers(root, marker, id, data, popup) {
     if (root.__delegatedBound) return;
@@ -654,12 +720,31 @@ function attachDelegatedHandlers(root, marker, id, data, popup) {
 
         const editBtn = ev.target.closest?.('.note-edit');
         if (editBtn) { ev.preventDefault(); ev.stopPropagation(); openEditModal(id, data); return; }
+
+        const copyBtn = ev.target.closest?.('.note-copycoords');
+        if (copyBtn) {
+            ev.preventDefault(); ev.stopPropagation();
+            const lat = Number(data.lat), lng = Number(data.lng);
+            const text = `${fmt(lat)}, ${fmt(lng)}`;
+            const ok = await copyToClipboard(text);
+            if (navigator.vibrate) try { navigator.vibrate(15); } catch { }
+            copyBtn.textContent = ok ? '¡Copiado!' : 'No se pudo copiar';
+            setTimeout(() => (copyBtn.textContent = 'Copiar coords'), 1100);
+            return;
+        }
+
+        const svBtn = ev.target.closest?.('.note-streetview');
+        if (svBtn) {
+            ev.preventDefault(); ev.stopPropagation();
+            openStreetView(data.lat, data.lng);
+            if (navigator.vibrate) try { navigator.vibrate(10); } catch { }
+            return;
+        }
     });
 
     // Doble clic para renombrar rápido
     root.addEventListener('dblclick', async (ev) => {
-        const target = ev.target.closest?.('.note-title-view');
-        if (!target) return;
+        const target = ev.target.closest?.('.note-title-view'); if (!target) return;
         ev.preventDefault(); ev.stopPropagation();
 
         const input = document.createElement('input');
@@ -721,17 +806,20 @@ function openNote(id) {
 }
 
 /* ================= Render (solo snapshot) ================= */
+function shallowEqPos(a, b) { return a && b && a.lat === b.lat && a.lng === b.lng; }
 function renderOrUpdate(id, data) {
     if (typeof data?.lat !== 'number' || typeof data?.lng !== 'number') return;
     const ll = L.latLng(data.lat, data.lng);
     const iconType = data.iconType || 'note';
     const color = data.color || '#000000';
+
+    const prev = notesData.get(id);
     notesData.set(id, data);
 
     if (!markers.has(id)) {
         const m = L.marker(ll, {
-            pane: NOTES_PANE,              // <- usa pane propio (debajo de caracteres)
-            icon: makeIcon(iconType, color),
+            pane: NOTES_PANE,
+            icon: getIcon(iconType, color),
             keyboard: false,
             riseOnHover: true,
             bubblingMouseEvents: false
@@ -740,9 +828,13 @@ function renderOrUpdate(id, data) {
         bindPopup(m, id, data);
     } else {
         const m = markers.get(id);
-        try { m.setLatLng(ll); } catch { }
-        m.setIcon(makeIcon(iconType, color)); // si cambió icono/color en DB
-        bindPopup(m, id, data);
+        if (!shallowEqPos(prev, data)) { try { m.setLatLng(ll); } catch { } }
+        if (!prev || prev.iconType !== iconType || prev.color !== color) {
+            m.setIcon(getIcon(iconType, color));
+        }
+        if (!prev || prev.title !== data.title || prev.body !== data.body) {
+            bindPopup(m, id, data);
+        }
     }
 
     if (listOpen) renderListDebounced();
@@ -776,18 +868,34 @@ async function safeDeleteNote(id) {
         try { map.closePopup?.(); } catch { }
     }
 }
+
+/* ===== Snapshot batching con rAF ===== */
+const pending = new Map(); // id -> { type, data }
+let rafScheduled = false;
+function scheduleFlush() { if (!rafScheduled) { rafScheduled = true; requestAnimationFrame(flushPending); } }
+function flushPending() {
+    rafScheduled = false;
+    if (pending.size === 0) return;
+    const entries = Array.from(pending.entries());
+    pending.clear();
+    for (const [id, rec] of entries) {
+        if (rec.type === 'removed') removeMarker(id);
+        else renderOrUpdate(id, rec.data);
+    }
+}
 function startRealtime() {
     try { unsub?.(); } catch { }
     try {
         unsub = notesRef().onSnapshot((snap) => {
             snap.docChanges().forEach((ch) => {
                 const id = ch.doc.id;
-                if (ch.type === 'added' || ch.type === 'modified') {
-                    renderOrUpdate(id, ch.doc.data());
-                } else if (ch.type === 'removed') {
-                    removeMarker(id);
+                if (ch.type === 'removed') {
+                    pending.set(id, { type: 'removed' });
+                } else {
+                    pending.set(id, { type: 'upsert', data: ch.doc.data() });
                 }
             });
+            scheduleFlush();
         }, (err) => console.error('[notes] snapshot error:', err));
     } catch (e) {
         console.error('[notes] No se pudo iniciar onSnapshot:', e);
@@ -797,10 +905,38 @@ function startRealtime() {
 /* ================= Init ================= */
 function init() {
     ensureCssOnce();
-    ensureNotesPane();                 // <- crea el pane con z-index 580
+    ensureNotesPane();
     map.addControl(new NotesControl());
     map.addControl(new NotesListControl());
     startRealtime();
+
+    // ====== Registro en el bus ======
+    try {
+        // Modo crear nota (sticky)
+        registerTool('notes', {
+            sticky: true,
+            enable: () => enableNoteMode(),
+            disable: () => disableNoteMode(),
+            buttons: ['#btn-notes'] // opcional: para botones HTML externos
+        });
+
+        // Lista de notas (sticky)
+        registerTool('notes-list', {
+            sticky: true,
+            enable: () => openListPanel(),
+            disable: () => closeListPanel(),
+            buttons: ['#btn-notes-list'] // opcional: botón HTML externo
+        });
+
+        // Edición/Borrado (momentáneo): apaga otras tools y si cambia de tool, cierra modales
+        registerTool('notes-edit', {
+            sticky: false,
+            enable: () => { }, // no hace falta, abrimos los modales explícitamente
+            disable: () => { closeEditModal(); closeDeleteModal(); }
+        });
+    } catch (e) {
+        console.error('[notes] toolsBus register error:', e);
+    }
 }
 if (map && typeof map.whenReady === 'function') { map.whenReady(init); } else { init(); }
 
